@@ -1,0 +1,7 @@
+glfw>=2.6
+moderngl>=5.8
+imgui-bundle>=1.92
+PyOpenGL>=3.1.7
+numpy
+pillow
+SpoutGL; sys_platform == "win32"
