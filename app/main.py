@@ -253,7 +253,7 @@ class App:
         imgui.render()
         self.ctx.screen.use()
         self.ctx.viewport = (0, 0, fw, fh)
-        self.ctx.clear(0.075, 0.08, 0.095, 1)
+        self.ctx.clear(*theme.BG, 1)
         self.impl.render(imgui.get_draw_data())
         glfw.swap_buffers(self.window)
 
