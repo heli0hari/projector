@@ -81,7 +81,7 @@ class Editor:
         self.in_canvas = Canvas()
         self.drag = None
         self.calib = False
-        self.projector_guides = True
+        self.projector_guides = False
         self.spout_list = []
         self.toast = ""
         self.toast_time = -10.0
@@ -290,6 +290,48 @@ class Editor:
         o.borderless = False
         p.outputs.append(o)
         self.set_active_output(len(p.outputs) - 1)
+
+    def split_cameras(self):
+        """One free, movable output window per atlas tile, each filled with that camera."""
+        from .model import Output
+        p = self.project
+        app = self.app
+        n = p.input_cols * p.input_rows
+        if n < 2:
+            return
+        self.push()
+        sw, sh = app.source.size if app.source else (1920, 1080)
+        tw, th = sw / p.input_cols, sh / p.input_rows
+        w = 800
+        h = int(round(w * th / max(tw, 1)))
+        # reuse windows made earlier by this button instead of piling up new ones
+        existing = {o.name: i for i, o in enumerate(p.outputs)}
+        opened = []
+        for k in range(n):
+            name = f"Camera {k + 1}"
+            if name in existing:
+                idx = existing[name]
+            else:
+                o = Output(name)
+                o.mode = "window"
+                o.borderless = False
+                o.width, o.height = w, h
+                o.x, o.y = 80 + 60 * k, 80 + 50 * k
+                p.outputs.append(o)
+                idx = len(p.outputs) - 1
+            surf = next((s for s in p.surfaces if s.output == idx and s.name == name), None)
+            if surf is None:
+                surf = Surface(name, k)
+                surf.output = idx
+                p.surfaces.append(surf)
+            surf.points = geo.lattice(surf.rows, surf.cols)
+            surf.source = p.tile_rect(k)
+            surf.touch()
+            opened.append(idx)
+        for idx in opened:
+            app.open_output(idx)
+        self.set_active_output(opened[0])
+        self.notify(f"{n} camera windows open - drag them where you need them")
 
     def delete_output(self):
         p = self.project
@@ -704,6 +746,12 @@ class Editor:
         ch, p.flip_input = self.toggle("##flip", p.flip_input)
         if ch:
             app.dirty = True
+        if p.input_cols * p.input_rows > 1:
+            imgui.dummy(V2(0, 2 * sc))
+            if self.button("One window per camera", -1, "primary"):
+                self.split_cameras()
+            if imgui.is_item_hovered():
+                imgui.set_tooltip("Creates a movable output window for each camera tile and opens them")
         self.end_card()
 
         # ---- outputs
