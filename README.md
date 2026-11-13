@@ -3,7 +3,7 @@
 A small projection-mapping tool for Windows. It receives a live Spout feed from Blender or After Effects, lets you warp it onto surfaces, and sends the result fullscreen to your projector.
 
 ## Run
-1. Install **Python 3.12** (from python.org, and tick *Add to PATH*).
+1. Install **Python 3.13** (3.11–3.13 work; 3.14 is not supported by Spout yet) from python.org, and tick *Add to PATH*.
 2. Double-click `run.bat`. The first run sets everything up.
 3. Optional: run `build_exe.bat` to get a standalone `dist\ProjMap\ProjMap.exe`.
 
