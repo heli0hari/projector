@@ -24,6 +24,7 @@ class Surface:
         self.points = np.array([[[0.25, 0.25], [0.75, 0.25]],
                                 [[0.25, 0.75], [0.75, 0.75]]], dtype=np.float64)
         self.source = geo.UNIT_SQUARE.copy()  # TL, TR, BR, BL in input space
+        self.output = 0
         self.version = 0
 
     @property
@@ -55,12 +56,13 @@ class Surface:
             "brightness": self.brightness, "feather": self.feather, "smooth": self.smooth,
             "color_index": self.color_index, "rows": self.rows, "cols": self.cols,
             "points": self.points.tolist(), "source": self.source.tolist(),
+            "output": self.output,
         }
 
     @classmethod
     def from_dict(cls, d):
         s = cls(d.get("name", "Surface"), d.get("color_index", 0))
-        for k in ("visible", "opacity", "brightness", "feather", "smooth", "rows", "cols"):
+        for k in ("visible", "opacity", "brightness", "feather", "smooth", "rows", "cols", "output"):
             if k in d:
                 setattr(s, k, d[k])
         s.points = np.array(d["points"], dtype=np.float64)
@@ -73,59 +75,142 @@ class Mask:
         self.name = name
         self.visible = True
         self.points = np.array([[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]], dtype=np.float64)
+        self.output = 0
         self.version = 0
 
     def touch(self):
         self.version += 1
 
     def to_dict(self):
-        return {"name": self.name, "visible": self.visible, "points": self.points.tolist()}
+        return {"name": self.name, "visible": self.visible, "points": self.points.tolist(),
+                "output": self.output}
 
     @classmethod
     def from_dict(cls, d):
         m = cls(d.get("name", "Mask"))
         m.visible = d.get("visible", True)
+        m.output = d.get("output", 0)
         m.points = np.array(d["points"], dtype=np.float64)
         return m
 
 
-class Project:
-    def __init__(self):
+class Output:
+    """One output window: fullscreen on a display, or a free window."""
+
+    def __init__(self, name="Output 1"):
+        self.name = name
         self.width = 1920
         self.height = 1080
+        self.mode = "fullscreen"   # fullscreen | window
+        self.monitor = 1
+        self.x = 120
+        self.y = 120
+        self.borderless = True
+        self.lock = False
+        self.on_top = False
+
+    KEYS = ("name", "width", "height", "mode", "monitor", "x", "y", "borderless", "lock", "on_top")
+
+    def to_dict(self):
+        return {k: getattr(self, k) for k in self.KEYS}
+
+    @classmethod
+    def from_dict(cls, d):
+        o = cls()
+        for k in cls.KEYS:
+            if k in d:
+                setattr(o, k, d[k])
+        return o
+
+
+class Project:
+    def __init__(self):
         self.source_kind = "test"      # test | spout | image
         self.spout_name = ""
         self.image_path = ""
         self.flip_input = False
-        self.output_monitor = 1
+        self.input_cols = 1            # camera atlas layout of the input
+        self.input_rows = 1
+        self.outputs = [Output("Output 1")]
+        self.active_output = 0
         self.surfaces = [Surface("Surface 1", 0)]
         self.masks = []
         self.path = None
 
+    # the editor works on the active output
+    @property
+    def output(self):
+        self.active_output = max(0, min(self.active_output, len(self.outputs) - 1))
+        return self.outputs[self.active_output]
+
+    @property
+    def width(self):
+        return self.output.width
+
+    @width.setter
+    def width(self, v):
+        self.output.width = v
+
+    @property
+    def height(self):
+        return self.output.height
+
+    @height.setter
+    def height(self, v):
+        self.output.height = v
+
+    def tile_rect(self, index):
+        cols, rows = max(1, self.input_cols), max(1, self.input_rows)
+        c, r = index % cols, index // cols
+        x0, y0, x1, y1 = c / cols, r / rows, (c + 1) / cols, (r + 1) / rows
+        return np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=np.float64)
+
+    def remove_output(self, idx):
+        if len(self.outputs) <= 1:
+            return
+        self.outputs.pop(idx)
+        for it in self.surfaces + self.masks:
+            if it.output == idx:
+                it.output = 0
+            elif it.output > idx:
+                it.output -= 1
+            it.touch()
+        self.active_output = min(self.active_output, len(self.outputs) - 1)
+
     def to_dict(self):
         return {
-            "version": 1, "width": self.width, "height": self.height,
+            "version": 2,
             "source_kind": self.source_kind, "spout_name": self.spout_name,
             "image_path": self.image_path, "flip_input": self.flip_input,
-            "output_monitor": self.output_monitor,
+            "input_cols": self.input_cols, "input_rows": self.input_rows,
+            "outputs": [o.to_dict() for o in self.outputs],
+            "active_output": self.active_output,
             "surfaces": [s.to_dict() for s in self.surfaces],
             "masks": [m.to_dict() for m in self.masks],
         }
 
     def load_dict(self, d):
-        self.width = int(d.get("width", 1920))
-        self.height = int(d.get("height", 1080))
         self.source_kind = d.get("source_kind", "test")
         self.spout_name = d.get("spout_name", "")
         self.image_path = d.get("image_path", "")
         self.flip_input = d.get("flip_input", False)
-        self.output_monitor = d.get("output_monitor", 1)
+        self.input_cols = int(d.get("input_cols", 1))
+        self.input_rows = int(d.get("input_rows", 1))
+        if "outputs" in d:
+            self.outputs = [Output.from_dict(o) for o in d["outputs"]] or [Output()]
+        else:  # version 1 projects had a single output
+            o = Output("Output 1")
+            o.width = int(d.get("width", 1920))
+            o.height = int(d.get("height", 1080))
+            o.monitor = d.get("output_monitor", 1)
+            self.outputs = [o]
+        self.active_output = int(d.get("active_output", 0))
         self.surfaces = [Surface.from_dict(s) for s in d.get("surfaces", [])]
         self.masks = [Mask.from_dict(m) for m in d.get("masks", [])]
-        for s in self.surfaces:
-            s.touch()
-        for m in self.masks:
-            m.touch()
+        n = len(self.outputs)
+        for it in self.surfaces + self.masks:
+            it.output = it.output if 0 <= it.output < n else 0
+            it.touch()
 
     def save(self, path):
         with open(path, "w", encoding="utf-8") as f:

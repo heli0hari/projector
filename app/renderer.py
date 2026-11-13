@@ -114,11 +114,7 @@ class Renderer:
         self.flat_prog = ctx.program(vertex_shader=FLAT_VS, fragment_shader=FLAT_FS)
         self.blit_prog, self.blit_vao = make_blitter(ctx)
         self.cache = {}
-        self.comp_tex = None
-        self.comp_fbo = None
-        self.guide_tex = None
-        self.guide_fbo = None
-        self.size = (0, 0)
+        self.targets = {}  # output index -> dict(size, comp_tex, comp_fbo, guide_tex, guide_fbo)
         idx = []
         n = TESS + 1
         for j in range(TESS):
@@ -127,19 +123,35 @@ class Renderer:
                 idx += [a, a + 1, a + n, a + 1, a + n + 1, a + n]
         self.ibo = ctx.buffer(np.array(idx, dtype="i4").tobytes())
 
-    def ensure_targets(self, w, h):
-        if self.size == (w, h):
-            return
-        for o in (self.comp_fbo, self.comp_tex, self.guide_fbo, self.guide_tex):
-            if o is not None:
-                o.release()
-        self.comp_tex = self.ctx.texture((w, h), 4)
-        self.comp_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self.comp_fbo = self.ctx.framebuffer([self.comp_tex])
-        self.guide_tex = self.ctx.texture((w, h), 4)
-        self.guide_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self.guide_fbo = self.ctx.framebuffer([self.guide_tex])
-        self.size = (w, h)
+    def _target(self, idx, w, h):
+        t = self.targets.get(idx)
+        if t and t["size"] == (w, h):
+            return t
+        if t:
+            for k in ("comp_fbo", "comp_tex", "guide_fbo", "guide_tex"):
+                t[k].release()
+        t = {"size": (w, h)}
+        for k in ("comp", "guide"):
+            tex = self.ctx.texture((w, h), 4)
+            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            t[k + "_tex"] = tex
+            t[k + "_fbo"] = self.ctx.framebuffer([tex])
+        self.targets[idx] = t
+        return t
+
+    def tex(self, idx):
+        t = self.targets.get(idx)
+        return t["comp_tex"] if t else None
+
+    def guide_tex(self, idx):
+        t = self.targets.get(idx)
+        return t["guide_tex"] if t else None
+
+    def prune(self, n_outputs):
+        for idx in [k for k in self.targets if k >= n_outputs]:
+            t = self.targets.pop(idx)
+            for k in ("comp_fbo", "comp_tex", "guide_fbo", "guide_tex"):
+                t[k].release()
 
     # ---------- meshes ----------
     def _surface_vao(self, s):
@@ -182,12 +194,16 @@ class Renderer:
         vbo.release()
 
     # ---------- passes ----------
-    def render(self, project, source, calib=False):
-        self.ensure_targets(project.width, project.height)
+    def gc(self, project):
         self._gc(project.surfaces + project.masks)
+        self.prune(len(project.outputs))
+
+    def render(self, project, source, calib, idx):
+        out = project.outputs[idx]
+        t = self._target(idx, out.width, out.height)
         ctx = self.ctx
-        self.comp_fbo.use()
-        ctx.viewport = (0, 0, project.width, project.height)
+        t["comp_fbo"].use()
+        ctx.viewport = (0, 0, out.width, out.height)
         ctx.clear(0, 0, 0, 1)
         ctx.enable(moderngl.BLEND)
         ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
@@ -198,7 +214,7 @@ class Renderer:
         p["flip_v"].value = bool(source.origin_bottom ^ project.flip_input) if source else False
         p["calib"].value = calib
         for s in project.surfaces:
-            if not s.visible:
+            if not s.visible or s.output != idx:
                 continue
             vao = self._surface_vao(s)
             p["opacity"].value = float(s.opacity)
@@ -210,7 +226,7 @@ class Renderer:
         # masks: blackout
         verts = []
         for m in project.masks:
-            if not m.visible or len(m.points) < 3:
+            if not m.visible or m.output != idx or len(m.points) < 3:
                 continue
             for tri in geo.triangulate(m.points):
                 for i in tri:
@@ -219,13 +235,15 @@ class Renderer:
         self._flat(verts, moderngl.TRIANGLES)
         ctx.disable(moderngl.BLEND)
 
-    def render_guides(self, project, sel_kind, sel_index, sel_point):
+    def render_guides(self, project, idx, sel_kind, sel_index, sel_point):
         """Composite + outlines, for calibrating directly on the wall."""
-        w, h = project.width, project.height
+        out = project.outputs[idx]
+        w, h = out.width, out.height
+        t = self.targets[idx]
         ctx = self.ctx
-        self.guide_fbo.use()
+        t["guide_fbo"].use()
         ctx.viewport = (0, 0, w, h)
-        self.comp_tex.use(0)
+        t["comp_tex"].use(0)
         self.blit_prog["tex"].value = 0
         self.blit_vao.render(moderngl.TRIANGLE_STRIP)
         lines = []
@@ -244,7 +262,7 @@ class Renderer:
                 quads.append([q[0], q[1], *c])
 
         for i, s in enumerate(project.surfaces):
-            if not s.visible:
+            if not s.visible or s.output != idx:
                 continue
             selected = sel_kind == "surface" and sel_index == i
             col = (*s.color, 1.0) if selected else (*s.color, 0.55)
@@ -262,7 +280,7 @@ class Renderer:
                         hot = sel_point == (r, c)
                         square(pts[r, c], 9 if hot else 5, (1, 1, 1, 1) if hot else col)
         for i, m in enumerate(project.masks):
-            if not m.visible:
+            if not m.visible or m.output != idx:
                 continue
             selected = sel_kind == "mask" and sel_index == i
             col = (1, 0.2, 0.2, 1.0 if selected else 0.5)

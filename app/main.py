@@ -73,11 +73,9 @@ class App:
         self.rebuild_source()
         self.editor = Editor(self)
 
-        self.out_win = None
-        self.out_ctx = None
-        self.out_tex = None
-        self.out_tex_key = None
-        self.out_blit = None
+        self.outs = {}       # output index -> OutWindow
+        self._placing = False
+        self._close_requests = set()
         self.last_autosave = time.time()
 
     # ------------------------------------------------------------ misc
@@ -126,76 +124,126 @@ class App:
         mode = glfw.get_video_mode(mons[min(idx, len(mons) - 1)])
         return mode.size.width, mode.size.height
 
-    # ------------------------------------------------------------ output window
+    # ------------------------------------------------------------ output windows
+    def is_open(self, idx=None):
+        return (self.project.active_output if idx is None else idx) in self.outs
+
     @property
     def output_open(self):
-        return self.out_win is not None
+        return self.is_open()
 
-    def toggle_output(self):
-        if self.out_win:
-            self.close_output()
+    def open_count(self):
+        return len(self.outs)
+
+    def toggle_output(self, idx=None):
+        idx = self.project.active_output if idx is None else idx
+        if idx in self.outs:
+            self.close_output(idx)
         else:
-            self.open_output()
+            self.open_output(idx)
 
-    def open_output(self):
-        mons = self.monitors()
-        single = len(mons) < 2
+    def open_output(self, idx):
+        if idx in self.outs or idx >= len(self.project.outputs):
+            return
+        o = self.project.outputs[idx]
         gl_hints()
         glfw.window_hint(glfw.AUTO_ICONIFY, False)
         glfw.window_hint(glfw.FOCUS_ON_SHOW, False)
-        if not single:
-            glfw.window_hint(glfw.DECORATED, False)
-        w, h = (960, 540) if single else (640, 360)
-        self.out_win = glfw.create_window(w, h, "ProjMap Output", None, self.window)
-        if not self.out_win:
+        glfw.window_hint(glfw.VISIBLE, False)
+        win = glfw.create_window(max(64, o.width), max(64, o.height), f"ProjMap - {o.name}", None, self.window)
+        if not win:
             self.editor.notify("Could not create output window")
             return
-        self._out_single = single
-        glfw.set_key_callback(self.out_win, self._out_key)
-        glfw.make_context_current(self.out_win)
-        glfw.swap_interval(1)
-        self.out_ctx = moderngl.create_context()
-        self.out_blit = make_blitter(self.out_ctx)
-        self.out_tex = None
-        self.out_tex_key = None
+        glfw.make_context_current(win)
+        ctx = moderngl.create_context()
+        ow = {"win": win, "ctx": ctx, "blit": make_blitter(ctx), "tex": None, "key": None}
         glfw.make_context_current(self.window)
-        self.place_output()
-        glfw.show_window(self.out_win)
+        self.outs[idx] = ow
+        glfw.set_key_callback(win, lambda w, k, sc, a, m, i=idx: self._out_key(i, k, a, m))
+        glfw.set_window_pos_callback(win, lambda w, x, y, i=idx: self._out_moved(i, x, y))
+        glfw.set_window_size_callback(win, lambda w, ww, hh, i=idx: self._out_resized(i, ww, hh))
+        self.place_output(idx)
+        glfw.show_window(win)
         glfw.focus_window(self.window)
+        self._sync_vsync()
 
-    def place_output(self):
-        if not self.out_win or self._out_single:
+    def place_output(self, idx=None):
+        idx = self.project.active_output if idx is None else idx
+        ow = self.outs.get(idx)
+        if not ow:
             return
-        mons = self.monitors()
-        m = mons[min(self.project.output_monitor, len(mons) - 1)]
-        x, y = glfw.get_monitor_pos(m)
-        mode = glfw.get_video_mode(m)
-        glfw.set_window_pos(self.out_win, x, y)
-        # +1 px height avoids the driver's exclusive-fullscreen switch on Windows
-        glfw.set_window_size(self.out_win, mode.size.width, mode.size.height + 1)
+        o = self.project.outputs[idx]
+        win = ow["win"]
+        self._placing = True
+        try:
+            if o.mode == "fullscreen":
+                mons = self.monitors()
+                m = mons[min(o.monitor, len(mons) - 1)]
+                x, y = glfw.get_monitor_pos(m)
+                mode = glfw.get_video_mode(m)
+                glfw.set_window_attrib(win, glfw.DECORATED, False)
+                glfw.set_window_attrib(win, glfw.RESIZABLE, False)
+                glfw.set_window_attrib(win, glfw.FLOATING, False)
+                glfw.set_window_pos(win, x, y)
+                # +1 px height avoids the driver's exclusive-fullscreen switch on Windows
+                glfw.set_window_size(win, mode.size.width, mode.size.height + 1)
+            else:
+                glfw.set_window_attrib(win, glfw.DECORATED, not o.borderless)
+                glfw.set_window_attrib(win, glfw.RESIZABLE, not o.lock)
+                glfw.set_window_attrib(win, glfw.FLOATING, bool(o.on_top))
+                glfw.set_window_pos(win, int(o.x), int(o.y))
+                glfw.set_window_size(win, int(o.width), int(o.height))
+        finally:
+            self._placing = False
 
-    def close_output(self):
-        if not self.out_win:
+    def _out_moved(self, idx, x, y):
+        if self._placing or idx >= len(self.project.outputs):
             return
-        glfw.make_context_current(self.out_win)
-        if self.out_tex:
-            self.out_tex.release()
-        self.out_blit[1].release()
-        self.out_blit[0].release()
-        self.out_ctx.release()
-        glfw.destroy_window(self.out_win)
-        self.out_win = None
-        self.out_ctx = None
-        self.out_tex = None
+        o = self.project.outputs[idx]
+        if o.mode == "window":
+            o.x, o.y = x, y
+            self.dirty = True
+
+    def _out_resized(self, idx, w, h):
+        if self._placing or idx >= len(self.project.outputs) or w < 16 or h < 16:
+            return
+        o = self.project.outputs[idx]
+        if o.mode == "window":
+            o.width, o.height = w, h
+            self.dirty = True
+
+    def close_output(self, idx):
+        ow = self.outs.pop(idx, None)
+        if not ow:
+            return
+        glfw.make_context_current(ow["win"])
+        if ow["tex"]:
+            ow["tex"].release()
+        ow["blit"][1].release()
+        ow["blit"][0].release()
+        ow["ctx"].release()
+        glfw.destroy_window(ow["win"])
+        glfw.make_context_current(self.window)
+        self._sync_vsync()
+
+    def close_all_outputs(self):
+        for idx in list(self.outs):
+            self.close_output(idx)
+
+    def _sync_vsync(self):
+        # only one window waits for vsync, otherwise every extra window halves the frame rate
+        for k, idx in enumerate(sorted(self.outs)):
+            glfw.make_context_current(self.outs[idx]["win"])
+            glfw.swap_interval(1 if k == 0 else 0)
         glfw.make_context_current(self.window)
 
-    def _out_key(self, win, key, scancode, action, mods):
+    def _out_key(self, idx, key, action, mods):
         if action not in (glfw.PRESS, glfw.REPEAT):
             return
         step = 10 if mods & glfw.MOD_SHIFT else 1
         e = self.editor
-        if key == glfw.KEY_ESCAPE or (key == glfw.KEY_F and action == glfw.PRESS):
-            self._close_requested = True
+        if key == glfw.KEY_ESCAPE:
+            self._close_requests.add(idx)
         elif key == glfw.KEY_LEFT:
             e.nudge(-step, 0)
         elif key == glfw.KEY_RIGHT:
@@ -211,26 +259,27 @@ class App:
         elif key == glfw.KEY_C and action == glfw.PRESS:
             e.calib = not e.calib
 
-    def draw_output(self, tex):
-        win = self.out_win
+    def draw_output(self, idx, tex):
+        ow = self.outs[idx]
+        win = ow["win"]
         glfw.make_context_current(win)
         key = (tex.glo, tex.size)
-        if self.out_tex_key != key:
-            if self.out_tex:
-                self.out_tex.release()
-            self.out_tex = self.out_ctx.external_texture(tex.glo, tex.size, 4, 0, "f1")
-            self.out_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-            self.out_tex_key = key
+        if ow["key"] != key:
+            if ow["tex"]:
+                ow["tex"].release()
+            ow["tex"] = ow["ctx"].external_texture(tex.glo, tex.size, 4, 0, "f1")
+            ow["tex"].filter = (moderngl.LINEAR, moderngl.LINEAR)
+            ow["key"] = key
         fw, fh = glfw.get_framebuffer_size(win)
-        self.out_ctx.screen.use()
-        self.out_ctx.viewport = (0, 0, fw, fh)
-        self.out_ctx.clear(0, 0, 0, 1)
-        self.out_tex.use(0)
-        prog, vao = self.out_blit
+        ctx = ow["ctx"]
+        ctx.screen.use()
+        ctx.viewport = (0, 0, fw, fh)
+        ctx.clear(0, 0, 0, 1)
+        ow["tex"].use(0)
+        prog, vao = ow["blit"]
         prog["tex"].value = 0
         vao.render(moderngl.TRIANGLE_STRIP)
         glfw.swap_buffers(win)
-        glfw.make_context_current(self.window)
 
     # ------------------------------------------------------------ loop
     def frame(self):
@@ -238,14 +287,24 @@ class App:
         self.impl.process_inputs()
         glfw.make_context_current(self.window)
 
+        p = self.project
+        for idx in [i for i in self.outs if i >= len(p.outputs)]:
+            self.close_output(idx)
         if self.source:
             self.source.update()
         e = self.editor
-        self.renderer.render(self.project, self.source, e.calib)
-        out_tex = self.renderer.comp_tex
-        if self.out_win and e.projector_guides:
-            self.renderer.render_guides(self.project, e.sel_kind, e.sel_index, e.sel_point)
-            out_tex = self.renderer.guide_tex
+        r = self.renderer
+        r.gc(p)
+        to_render = set(self.outs) | {p.active_output}
+        out_tex = {}
+        for idx in sorted(to_render):
+            r.render(p, self.source, e.calib, idx)
+            if idx in self.outs:
+                if e.projector_guides:
+                    r.render_guides(p, idx, e.sel_kind, e.sel_index, e.sel_point)
+                    out_tex[idx] = r.guide_tex(idx)
+                else:
+                    out_tex[idx] = r.tex(idx)
 
         imgui.new_frame()
         fw, fh = glfw.get_framebuffer_size(self.window)
@@ -257,12 +316,16 @@ class App:
         self.impl.render(imgui.get_draw_data())
         glfw.swap_buffers(self.window)
 
-        if self.out_win:
+        if self.outs:
             self.ctx.finish()
-            self.draw_output(out_tex)
-            if glfw.window_should_close(self.out_win) or getattr(self, "_close_requested", False):
-                self._close_requested = False
-                self.close_output()
+            for idx in sorted(self.outs):
+                if idx in out_tex:
+                    self.draw_output(idx, out_tex[idx])
+            glfw.make_context_current(self.window)
+            for idx in list(self.outs):
+                if glfw.window_should_close(self.outs[idx]["win"]) or idx in self._close_requests:
+                    self.close_output(idx)
+            self._close_requests.clear()
 
         if self.dirty and time.time() - self.last_autosave > 5:
             self.autosave()
@@ -271,10 +334,10 @@ class App:
     def run(self):
         while not glfw.window_should_close(self.window):
             self.frame()
-            if glfw.get_window_attrib(self.window, glfw.ICONIFIED) and not self.out_win:
+            if glfw.get_window_attrib(self.window, glfw.ICONIFIED) and not self.outs:
                 time.sleep(0.05)
         self.autosave()
-        self.close_output()
+        self.close_all_outputs()
         if self.source:
             self.source.release()
         self.impl.shutdown()

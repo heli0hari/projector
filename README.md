@@ -13,6 +13,9 @@ A small projection-mapping tool for Windows. It receives a live Spout feed from 
 3. *Preferences > System > Backend* must be **OpenGL**.
 4. In the 3D View, press N, open the **ProjMap** tab and click **Start streaming**. It streams the active scene camera, using the viewport's shading mode (Material Preview / Rendered with EEVEE).
 
+### Several cameras (camera atlas)
+In the Blender panel, switch to **Camera atlas**, then click **+** to add cameras: it adds the selected ones, or every scene camera if none are selected. All the cameras are tiled into one stream, so they always stay in sync. In ProjMap, set **Input > Atlas** to the cols x rows that Blender shows, then pick a **Camera** tile for each surface. Each camera is a full render, so the frame rate drops with every camera you add.
+
 ## After Effects (live comp)
 Rather than writing a custom AE plugin, use the free, maintained route:
 1. Install **NDI Tools** (it includes *NDI for Adobe CC*), then in AE go to *Preferences > Video Preview*, enable **Mercury Transmit** and tick **NDI Output**.
@@ -23,7 +26,7 @@ Alternative: the open-source `Spout-AfterEffects` plugin sends Spout directly, b
 
 ## Workflow
 1. Set **Input**: Spout, a test pattern, or an image.
-2. Pick the projector monitor, click **Match**, then **Open projector output** (F).
+2. **Outputs**: each output is either *Fullscreen on display* or a *Free window* that you can move and resize (with no-frame, lock and on-top options). Every output has its own surfaces. Click **Open**, the dot on the output's row, or press F to show it.
 3. **Output tab**: drag the 4 corners onto the real object. Corner pin is perspective-correct.
 4. For curved surfaces, raise **Grid** (e.g. 4x3) and drag the inner points. Moving a corner carries the whole mesh with it; hold Alt to move only the corner.
 5. **Input tab**: choose which part of the feed each surface shows. This is how one Blender render can feed several surfaces.

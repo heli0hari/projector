@@ -131,6 +131,7 @@ class Editor:
         p = self.project
         s = Surface(f"Surface {len(p.surfaces) + 1}", len(p.surfaces))
         s.points += 0.03 * (len(p.surfaces) % 5)
+        s.output = p.active_output
         s.touch()
         p.surfaces.append(s)
         self.select("surface", len(p.surfaces) - 1)
@@ -159,7 +160,9 @@ class Editor:
     def add_mask(self):
         self.push()
         p = self.project
-        p.masks.append(Mask(f"Mask {len(p.masks) + 1}"))
+        m = Mask(f"Mask {len(p.masks) + 1}")
+        m.output = p.active_output
+        p.masks.append(m)
         self.select("mask", len(p.masks) - 1)
 
     def delete_selected(self):
@@ -245,6 +248,7 @@ class Editor:
     # ================================================================ project io
     def new_project(self):
         self.push()
+        self.app.close_all_outputs()
         self.project.load_dict(Project().to_dict())
         self.project.path = None
         self.select("surface", 0)
@@ -255,6 +259,7 @@ class Editor:
         if path:
             try:
                 self.push()
+                self.app.close_all_outputs()
                 self.project.load(path)
                 self.select("surface", 0)
                 self.app.rebuild_source()
@@ -437,7 +442,7 @@ class Editor:
 
         def tele(dl, a, b):
             pad = 14 * sc
-            T.draw_text(dl, "mono", 8.5, V2(a.x + pad, a.y + pad), col32(*DIM), "OUTPUT CANVAS", 1.4)
+            T.draw_text(dl, "mono", 8.5, V2(a.x + pad, a.y + pad), col32(*DIM), f"O{p.active_output + 1}  {p.output.name.upper()[:18]}", 1.4)
             pw = T.tracked_width("mono_medium", 9, state, 1.2) + 26 * sc
             self.pill(dl, V2(b.x - pad - pw, a.y + pad - 5 * sc), state, scol, 9, True)
             big = f"{p.width}"
@@ -523,47 +528,34 @@ class Editor:
         if ch:
             app.dirty = True
 
-        # ---- projector
-        self.section("02", "Projector")
-        mons = app.monitor_names()
-        if mons:
-            mi = min(p.output_monitor, len(mons) - 1)
-            self.label("Display")
-            ch, mi = imgui.combo("##mon", mi, mons)
-            if ch:
-                p.output_monitor = mi
-                app.place_output()
-                app.dirty = True
-        self.label("Canvas")
-        avail = imgui.get_content_region_avail().x
-        sp = imgui.get_style().item_spacing.x
-        fw = (avail - 64 * sc - 2 * sp - 14 * sc) / 2
-        imgui.set_next_item_width(fw)
-        ch1, w_ = imgui.input_int("##w", p.width, 0)
-        imgui.same_line()
-        with T.use("mono", 10):
-            imgui.text_disabled("x")
-        imgui.same_line()
-        imgui.set_next_item_width(fw)
-        ch2, h_ = imgui.input_int("##h", p.height, 0)
-        if ch1 or ch2:
-            p.width = int(np.clip(w_, 64, 8192))
-            p.height = int(np.clip(h_, 64, 8192))
+        self.label("Atlas")
+        ch, v = imgui.slider_int2("##atlas", [p.input_cols, p.input_rows], 1, 6, "%d")
+        if imgui.is_item_activated():
+            self.push()
+        if ch:
+            p.input_cols, p.input_rows = max(1, v[0]), max(1, v[1])
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Camera atlas layout (columns x rows). Match the Blender add-on.")
+
+        # ---- outputs
+        self.section("02", "Outputs")
+        self.output_list()
+        hit = self.button_row(["+ Output", "Del", "Match", "Open" if not app.is_open() else "Close"],
+                              ["ghost", "ghost", "ghost", "primary" if not app.is_open() else "ghost"])
+        if hit == 0:
+            self.add_output()
+        elif hit == 1:
+            self.delete_output()
+        elif hit == 2:
+            o = p.output
+            if o.mode == "fullscreen":
+                r = app.monitor_resolution(o.monitor)
+                if r:
+                    o.width, o.height = r
             app.dirty = True
-        imgui.same_line()
-        if self.button("Match", -1):
-            r = app.monitor_resolution(p.output_monitor)
-            if r:
-                p.width, p.height = r
-                app.dirty = True
-        imgui.dummy(V2(0, 2 * sc))
-        label = "Projector live  -  close  [F]" if app.output_open else "Open projector output  [F]"
-        if self.button(label, -1, "primary" if not app.output_open else "ghost", active=False):
+        elif hit == 3:
             app.toggle_output()
-        if app.output_open:
-            a = imgui.get_item_rect_min()
-            hh = imgui.get_item_rect_size().y
-            dl.add_circle_filled(V2(a.x + 14 * sc, a.y + hh / 2), 3.5 * sc, col32(*LIVE))
+        self.output_props(p.output)
         self.label("Guides")
         _, self.projector_guides = imgui.checkbox("##guides", self.projector_guides)
         imgui.same_line(0, 22 * sc)
@@ -587,7 +579,7 @@ class Editor:
 
         # ---- properties
         it = self.selected()
-        if it is not None:
+        if it is not None and it.output == p.active_output:
             self.section("04", "Surface" if isinstance(it, Surface) else "Mask")
             if isinstance(it, Surface):
                 self.surface_props(it)
@@ -595,10 +587,163 @@ class Editor:
                 self.mask_props(it)
         imgui.dummy(V2(0, 10 * sc))
 
+    def add_output(self):
+        from .model import Output
+        self.push()
+        p = self.project
+        o = Output(f"Output {len(p.outputs) + 1}")
+        o.mode = "window"
+        o.width, o.height = 960, 540
+        o.x, o.y = 160 + 40 * len(p.outputs), 160 + 40 * len(p.outputs)
+        o.borderless = False
+        p.outputs.append(o)
+        self.set_active_output(len(p.outputs) - 1)
+
+    def delete_output(self):
+        p = self.project
+        if len(p.outputs) <= 1:
+            self.notify("At least one output is needed")
+            return
+        self.push()
+        self.app.close_all_outputs()
+        p.remove_output(p.active_output)
+        self.select("surface", -1)
+
+    def set_active_output(self, idx):
+        p = self.project
+        if idx == p.active_output:
+            return
+        p.active_output = idx
+        self.drag = None
+        self.out_canvas.reset()
+        it = self.selected()
+        if it is None or it.output != idx:
+            first = next((i for i, s in enumerate(p.surfaces) if s.output == idx), None)
+            self.select("surface", first if first is not None else -1)
+
+    def output_list(self):
+        sc = self.sc
+        p = self.project
+        app = self.app
+        row_h = 32 * sc
+        n = max(1, min(len(p.outputs), 4))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, V2(0, 2 * sc))
+        imgui.begin_child("outputs", V2(0, n * (row_h + 2 * sc) + 2 * sc))
+        dl = imgui.get_window_draw_list()
+        width = imgui.get_content_region_avail().x
+        for i, o in enumerate(p.outputs):
+            imgui.push_id(f"out{i}")
+            a = imgui.get_cursor_screen_pos()
+            b = V2(a.x + width, a.y + row_h)
+            sel = p.active_output == i
+            if imgui.invisible_button("row", V2(width - 30 * sc, row_h)):
+                self.set_active_output(i)
+            hov = imgui.is_item_hovered()
+            imgui.same_line(0, 0)
+            if imgui.invisible_button("live", V2(30 * sc, row_h)):
+                app.toggle_output(i)
+            live_hov = imgui.is_item_hovered()
+            if live_hov:
+                imgui.set_tooltip("Close output" if app.is_open(i) else "Open output")
+            if sel:
+                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.05), 6 * sc)
+                dl.add_rect(a, b, col32(1, 1, 1, 0.10), 6 * sc, 1)
+            elif hov:
+                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.025), 6 * sc)
+            cy = a.y + row_h / 2
+            T.draw_text(dl, "mono", 9.5, V2(a.x + 10 * sc, cy - 6.5 * sc), col32(*(ACCENT if sel else DIM)), f"O{i + 1}")
+            x = a.x + 36 * sc
+            # little screen glyph
+            dl.add_rect(V2(x, cy - 4.5 * sc), V2(x + 11 * sc, cy + 3 * sc), col32(*INK, 0.8), 1, 1.1)
+            dl.add_line(V2(x + 3 * sc, cy + 5.5 * sc), V2(x + 8 * sc, cy + 5.5 * sc), col32(*INK, 0.8), 1.1)
+            T.draw_text(dl, "ui", 13, V2(x + 19 * sc, cy - 8.5 * sc), col32(*INK), o.name)
+            info = ("FULL " if o.mode == "fullscreen" else "WIN ") + f"{o.width}x{o.height}"
+            iw = T.tracked_width("mono", 9, info, 0.6)
+            T.draw_text(dl, "mono", 9, V2(b.x - 34 * sc - iw, cy - 6 * sc), col32(*DIM), info, 0.6)
+            ex = b.x - 15 * sc
+            if app.is_open(i):
+                dl.add_circle_filled(V2(ex, cy), 6 * sc, col32(*LIVE, 0.18))
+                dl.add_circle_filled(V2(ex, cy), 3 * sc, col32(*LIVE))
+            else:
+                dl.add_circle(V2(ex, cy), 4 * sc, col32(*(INK if live_hov else DIM)), 0, 1.1)
+            imgui.pop_id()
+        imgui.end_child()
+        imgui.pop_style_var()
+
+    def output_props(self, o):
+        sc = self.sc
+        app = self.app
+        idx = self.project.active_output
+        self.label("Name")
+        ch, o.name = imgui.input_text("##oname", o.name)
+        self.label("Mode")
+        modes = ["fullscreen", "window"]
+        ch, mi = imgui.combo("##omode", modes.index(o.mode), ["Fullscreen on display", "Free window"])
+        if ch:
+            self.push()
+            o.mode = modes[mi]
+            if o.mode == "fullscreen":
+                r = app.monitor_resolution(o.monitor)
+                if r:
+                    o.width, o.height = r
+            app.place_output(idx)
+        if o.mode == "fullscreen":
+            mons = app.monitor_names()
+            if mons:
+                self.label("Display")
+                ch, mi = imgui.combo("##mon", min(o.monitor, len(mons) - 1), mons)
+                if ch:
+                    o.monitor = mi
+                    app.place_output(idx)
+                    app.dirty = True
+            self.label("Canvas")
+            self.int_pair("##cw", "##ch", o, "width", "height", 64, 8192)
+        else:
+            self.label("Position")
+            if self.int_pair("##ox", "##oy", o, "x", "y", -10000, 10000):
+                app.place_output(idx)
+            self.label("Size")
+            if self.int_pair("##ow", "##oh", o, "width", "height", 64, 8192):
+                app.place_output(idx)
+            self.label("Window")
+            for key, text in (("borderless", "NO FRAME"), ("lock", "LOCK"), ("on_top", "ON TOP")):
+                ch, v = imgui.checkbox(f"##{key}", getattr(o, key))
+                if ch:
+                    setattr(o, key, v)
+                    app.place_output(idx)
+                    app.dirty = True
+                imgui.same_line(0, 4 * sc)
+                with T.use("mono", 9):
+                    imgui.text_disabled(text)
+                imgui.same_line(0, 10 * sc)
+            imgui.new_line()
+
+    def int_pair(self, id_a, id_b, obj, attr_a, attr_b, lo, hi):
+        sc = self.sc
+        avail = imgui.get_content_region_avail().x
+        sp = imgui.get_style().item_spacing.x
+        fw = (avail - 2 * sp - 10 * sc) / 2
+        imgui.set_next_item_width(fw)
+        ch1, a = imgui.input_int(id_a, int(getattr(obj, attr_a)), 0)
+        imgui.same_line()
+        with T.use("mono", 10):
+            imgui.text_disabled("x" if attr_a == "width" else ",")
+        imgui.same_line()
+        imgui.set_next_item_width(fw)
+        ch2, b = imgui.input_int(id_b, int(getattr(obj, attr_b)), 0)
+        if ch1 or ch2:
+            setattr(obj, attr_a, int(np.clip(a, lo, hi)))
+            setattr(obj, attr_b, int(np.clip(b, lo, hi)))
+            self.app.dirty = True
+            return True
+        return False
+
     def layer_list(self):
         sc = self.sc
         p = self.project
-        rows = [("surface", i, s) for i, s in enumerate(p.surfaces)] + [("mask", i, m) for i, m in enumerate(p.masks)]
+        ao = p.active_output
+        rows = ([("surface", i, s) for i, s in enumerate(p.surfaces) if s.output == ao] +
+                [("mask", i, m) for i, m in enumerate(p.masks) if m.output == ao])
         row_h = 32 * sc
         n = max(1, min(len(rows), 6))
         imgui.push_style_var(imgui.StyleVar_.item_spacing, V2(0, 2 * sc))
@@ -660,10 +805,44 @@ class Editor:
             setattr(obj, attr, v)
             obj.touch()
 
+    def output_combo(self, it):
+        p = self.project
+        if len(p.outputs) < 2:
+            return
+        self.label("Output")
+        names = [f"O{i + 1}  {o.name}" for i, o in enumerate(p.outputs)]
+        ch, oi = imgui.combo("##sout", it.output, names)
+        if ch and oi != it.output:
+            self.push()
+            it.output = oi
+            it.touch()
+            self.set_active_output(oi)
+            self.select("surface" if isinstance(it, Surface) else "mask",
+                        (p.surfaces if isinstance(it, Surface) else p.masks).index(it))
+
+    def tile_combo(self, s):
+        p = self.project
+        n = p.input_cols * p.input_rows
+        if n < 2:
+            return
+        current = 0
+        for k in range(n):
+            if np.allclose(s.source, p.tile_rect(k), atol=1e-6):
+                current = k + 1
+        self.label("Camera")
+        items = ["Custom"] + [f"Tile {k + 1}" for k in range(n)]
+        ch, ti = imgui.combo("##tile", current, items)
+        if ch and ti > 0:
+            self.push()
+            s.source = p.tile_rect(ti - 1)
+            s.touch()
+
     def surface_props(self, s):
         sc = self.sc
         self.label("Name")
         _, s.name = imgui.input_text("##name", s.name)
+        self.output_combo(s)
+        self.tile_combo(s)
         self.slider("Opacity", s, "opacity", 0, 1)
         self.slider("Bright", s, "brightness", 0, 2)
         self.slider("Feather", s, "feather", 0, 0.5)
@@ -698,6 +877,7 @@ class Editor:
     def mask_props(self, m):
         self.label("Name")
         _, m.name = imgui.input_text("##name", m.name)
+        self.output_combo(m)
         with T.use("mono", 9.5):
             imgui.text_disabled("DBL-CLICK EDGE   ADD POINT")
             imgui.text_disabled("RIGHT-CLICK PT   REMOVE")
@@ -715,7 +895,16 @@ class Editor:
 
         # ---- top bar
         dl.add_line(V2(wp.x, wp.y + bar_h), V2(wp.x + ww, wp.y + bar_h), col32(1, 1, 1, 0.06), 1)
-        self.segmented(V2(wp.x + 18 * sc, wp.y + 12 * sc))
+        seg_w = self.segmented(V2(wp.x + 18 * sc, wp.y + 12 * sc))
+        p = self.project
+        o = p.output
+        lab = f"O{p.active_output + 1}  {o.name.upper()}"
+        x0 = wp.x + 18 * sc + seg_w + 18 * sc
+        T.draw_text(dl, "mono_medium", 9.5, V2(x0, wp.y + 21 * sc), col32(*INK), lab, 1.2)
+        x0 += T.tracked_width("mono_medium", 9.5, lab, 1.2) + 12 * sc
+        live = self.app.is_open()
+        T.draw_text(dl, "mono", 9.5, V2(x0, wp.y + 21 * sc), col32(*(LIVE if live else DIM)),
+                    ("LIVE  " if live else "OFF  ") + f"{o.width}x{o.height}", 1.2)
         canvas = self.out_canvas if self.tab == "output" else self.in_canvas
         x = wp.x + ww - 18 * sc
         x = self.top_toggle("guides", "GUIDES", self.projector_guides, x, wp.y + 12 * sc)
@@ -765,6 +954,7 @@ class Editor:
             T.draw_text(dl, "mono_medium", 10, V2(x + 16 * sc, p.y + 8 * sc),
                         col32(0.03, 0.03, 0.03) if on else col32(*DIM), lab, 1.6)
             x += w
+        return total
 
     def top_toggle(self, sid, text, on, right_x, y):
         sc = self.sc
@@ -958,10 +1148,11 @@ class Editor:
         io = imgui.get_io()
         cv.layout(V2(pos.x + 40 * sc, pos.y + 22 * sc), V2(size.x - 40 * sc, size.y - 22 * sc), p.width / p.height)
         hovered, mouse, panning = self._canvas_input(cv, pos, size)
-        self._frame(dl, cv, self.app.renderer.comp_tex, True)
+        self._frame(dl, cv, self.app.renderer.tex(self.project.active_output), True)
 
+        ao = p.active_output
         for i, s in enumerate(p.surfaces):
-            if not s.visible:
+            if not s.visible or s.output != ao:
                 continue
             sel = self.sel_kind == "surface" and self.sel_index == i
             b = geo.boundary(s.points, 20, s.smooth)
@@ -976,27 +1167,27 @@ class Editor:
                         if r + 1 < g.shape[0]:
                             dl.add_line(cv.v(g[r, cc]), cv.v(g[r + 1, cc]), col32(*s.color, 0.25), 1)
         for i, m in enumerate(p.masks):
-            if not m.visible:
+            if not m.visible or m.output != ao:
                 continue
             sel = self.sel_kind == "mask" and self.sel_index == i
             self.dashed(dl, [cv.v(q) for q in m.points], col32(*MASK_COL, 1.0 if sel else 0.55), (1.4 if sel else 1.0) * sc)
         # callouts on top of outlines
-        rows_index = 0
         for i, s in enumerate(p.surfaces):
-            rows_index += 1
-            if not s.visible:
+            if not s.visible or s.output != ao:
                 continue
             sel = self.sel_kind == "surface" and self.sel_index == i
             c = cv.v(geo.eval_grid(s.points, [0.5], [0.5], s.smooth)[0, 0])
             self.callout(dl, c, f"{i + 1:02d}", s.name, f"{s.cols}x{s.rows}", s.color, sel)
         for i, m in enumerate(p.masks):
-            if not m.visible:
+            if not m.visible or m.output != ao:
                 continue
             sel = self.sel_kind == "mask" and self.sel_index == i
             c = cv.v(m.points.mean(axis=0))
             self.callout(dl, c, f"{len(p.surfaces) + i + 1:02d}", m.name, "MASK", MASK_COL, sel)
         # handles
         it = self.selected()
+        if it is not None and it.output != ao:
+            it = None
         if isinstance(it, Surface) and it.visible:
             g = it.points
             for r in range(g.shape[0]):
@@ -1059,7 +1250,7 @@ class Editor:
             self.drag = None
 
         if self.drag and self.drag[0] == "point":
-            self.loupe(dl, cv, mouse, self.app.renderer.comp_tex, True)
+            self.loupe(dl, cv, mouse, self.app.renderer.tex(self.project.active_output), True)
 
     def loupe(self, dl, cv, mouse, tex, uv_flip):
         if tex is None:
@@ -1100,7 +1291,7 @@ class Editor:
 
     def _pick_point(self, cv, mouse):
         it = self.selected()
-        if it is None:
+        if it is None or (self.tab == "output" and it.output != self.project.active_output):
             return None
         best, best_d = None, PICK_R * self.sc
         if isinstance(it, Surface):
@@ -1120,16 +1311,18 @@ class Editor:
     def _pick_body(self, cv, mouse):
         n = cv.to_norm(mouse)
         p = self.project
+        ao = p.active_output
         for i in range(len(p.masks) - 1, -1, -1):
-            if p.masks[i].visible and geo.point_in_poly(n, p.masks[i].points):
+            m = p.masks[i]
+            if m.visible and m.output == ao and geo.point_in_poly(n, m.points):
                 return "mask", i
         if self.sel_kind == "surface" and 0 <= self.sel_index < len(p.surfaces):
             s = p.surfaces[self.sel_index]
-            if s.visible and geo.point_in_poly(n, geo.boundary(s.points, 12, s.smooth)):
+            if s.visible and s.output == ao and geo.point_in_poly(n, geo.boundary(s.points, 12, s.smooth)):
                 return "surface", self.sel_index
         for i in range(len(p.surfaces) - 1, -1, -1):
             s = p.surfaces[i]
-            if s.visible and geo.point_in_poly(n, geo.boundary(s.points, 12, s.smooth)):
+            if s.visible and s.output == ao and geo.point_in_poly(n, geo.boundary(s.points, 12, s.smooth)):
                 return "surface", i
         return None, None
 
@@ -1160,12 +1353,30 @@ class Editor:
         flip = bool(src.origin_bottom ^ self.project.flip_input) if src else False
         self._frame(dl, cv, tex, flip)
         p = self.project
+        cols, rows = p.input_cols, p.input_rows
+        if cols * rows > 1:
+            gc = col32(*ACCENT, 0.5)
+            for c in range(1, cols):
+                dl.add_line(cv.v((c / cols, 0)), cv.v((c / cols, 1)), gc, 1)
+            for r in range(1, rows):
+                dl.add_line(cv.v((0, r / rows)), cv.v((1, r / rows)), gc, 1)
+            for k in range(cols * rows):
+                a = cv.v(((k % cols) / cols, (k // cols) / rows))
+                tag = f"CAM {k + 1:02d}"
+                tw = T.tracked_width("mono_medium", 9, tag, 1.0)
+                dl.add_rect_filled(V2(a.x, a.y), V2(a.x + tw + 14 * sc, a.y + 20 * sc), col32(*ACCENT, 0.9))
+                T.draw_text(dl, "mono_medium", 9, V2(a.x + 7 * sc, a.y + 4 * sc), col32(0.03, 0.03, 0.03), tag, 1.0)
+        ao = p.active_output
         for i, s in enumerate(p.surfaces):
+            if s.output != ao:
+                continue
             sel = self.sel_kind == "surface" and self.sel_index == i
             dl.add_polyline([cv.v(q) for q in s.source], col32(*s.color, 1.0 if sel else 0.45),
                             (1.6 if sel else 1.0) * sc, imgui.ImDrawFlags_.closed)
             self.callout(dl, cv.v(s.source.mean(axis=0)), f"{i + 1:02d}", s.name, "SRC", s.color, sel)
         s = self.selected()
+        if s is not None and s.output != ao:
+            s = None
         if isinstance(s, Surface):
             for k, q in enumerate(s.source):
                 hot = self.sel_point == k
@@ -1214,8 +1425,9 @@ class Editor:
 
     def _pick_source(self, cv, mouse):
         n = cv.to_norm(mouse)
-        for i in range(len(self.project.surfaces) - 1, -1, -1):
-            if geo.point_in_poly(n, self.project.surfaces[i].source):
+        p = self.project
+        for i in range(len(p.surfaces) - 1, -1, -1):
+            if p.surfaces[i].output == p.active_output and geo.point_in_poly(n, p.surfaces[i].source):
                 self.select("surface", i)
                 return
         self.sel_point = None
@@ -1246,7 +1458,8 @@ class Editor:
         seg(state, scol, scol)
         seg(f"FPS {io.framerate:03.0f}", DIM)
         seg(f"OUT {self.project.width}x{self.project.height}", DIM)
-        seg("PROJECTOR " + ("ON" if self.app.output_open else "OFF"), LIVE if self.app.output_open else DIM)
+        n_open = self.app.open_count()
+        seg(f"OUTPUTS {n_open}/{len(self.project.outputs)} LIVE", LIVE if n_open else DIM)
         it = self.selected()
         if it is not None:
             pt = ""
@@ -1265,6 +1478,11 @@ class Editor:
         if wp.x + ww - 18 * sc - mw > x:
             T.draw_text(dl, "mono", 8.5, V2(wp.x + ww - 18 * sc - mw, y + 1 * sc), col32(*col), msg, 0.8)
 
+    def after_history(self):
+        self.app.rebuild_source()
+        for idx in list(self.app.outs):
+            self.app.place_output(idx)
+
     def shortcuts(self):
         io = imgui.get_io()
         if io.want_text_input:
@@ -1277,10 +1495,10 @@ class Editor:
                 self.app.history.redo()
             else:
                 self.app.history.undo()
-            self.app.rebuild_source()
+            self.after_history()
         elif ctrl and imgui.is_key_pressed(K.y, False):
             self.app.history.redo()
-            self.app.rebuild_source()
+            self.after_history()
         elif ctrl and imgui.is_key_pressed(K.s, False):
             self.save_project()
         elif ctrl and imgui.is_key_pressed(K.d, False):
