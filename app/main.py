@@ -69,6 +69,12 @@ class App:
                 print("Could not load project:", e)
 
         self.renderer = Renderer(self.ctx)
+        self.gpu_name = self.ctx.info.get("GL_RENDERER", "")
+        from .renderer import BLIT_VS
+        import numpy as _np
+        self._bd_prog = self.ctx.program(vertex_shader=BLIT_VS, fragment_shader=theme.BACKDROP_FS)
+        self._bd_vbo = self.ctx.buffer(_np.array([-1, -1, 1, -1, -1, 1, 1, 1], dtype="f4").tobytes())
+        self._bd_vao = self.ctx.vertex_array(self._bd_prog, [(self._bd_vbo, "2f", "in_pos")])
         self.source = None
         self.rebuild_source()
         self.editor = Editor(self)
@@ -312,7 +318,10 @@ class App:
         imgui.render()
         self.ctx.screen.use()
         self.ctx.viewport = (0, 0, fw, fh)
-        self.ctx.clear(*theme.BG, 1)
+        self.ctx.disable(moderngl.BLEND)
+        self._bd_prog["res"].value = (float(fw), float(fh))
+        self._bd_prog["t"].value = float(time.perf_counter() % 10000)
+        self._bd_vao.render(moderngl.TRIANGLE_STRIP)
         self.impl.render(imgui.get_draw_data())
         glfw.swap_buffers(self.window)
 
@@ -345,6 +354,8 @@ class App:
 
 
 def main():
+    from .gpu_pref import ensure_and_relaunch
+    ensure_and_relaunch()
     path = sys.argv[1] if len(sys.argv) > 1 else None
     App(path).run()
 

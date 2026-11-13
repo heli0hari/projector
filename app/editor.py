@@ -4,7 +4,7 @@ from imgui_bundle import imgui
 from . import geometry as geo
 from . import theme as T
 from .model import Surface, Mask, Project
-from .theme import col32, ACCENT, INK, DIM, FAINT, PANEL, LIVE, WARN
+from .theme import col32, ACCENT, ACCENT_2, INK, DIM, FAINT, LIVE, WARN
 
 V2 = imgui.ImVec2
 PICK_R = 11.0
@@ -279,314 +279,6 @@ class Editor:
             except Exception as e:
                 self.notify(f"SAVE FAILED  {e}")
 
-    # ================================================================ widgets
-    def section(self, num, title):
-        sc = self.sc
-        imgui.dummy(V2(0, 10 * sc))
-        dl = imgui.get_window_draw_list()
-        p = imgui.get_cursor_screen_pos()
-        right = p.x + imgui.get_content_region_avail().x
-        T.draw_text(dl, "mono", 10, p, col32(*ACCENT), num)
-        x = p.x + T.text_size("mono", 10, num).x + 8 * sc
-        T.draw_text(dl, "mono_medium", 10, V2(x, p.y), col32(*INK), title.upper(), 1.6)
-        x += T.tracked_width("mono_medium", 10, title.upper(), 1.6) + 10 * sc
-        y = p.y + 7 * sc
-        dl.add_line(V2(x, y), V2(right, y), col32(*FAINT, 0.9), 1)
-        dl.add_line(V2(right, y - 3 * sc), V2(right, y + 3 * sc), col32(*FAINT), 1)
-        imgui.dummy(V2(0, 16 * sc))
-
-    def label(self, text, col_w=88):
-        sc = self.sc
-        p = imgui.get_cursor_screen_pos()
-        h = imgui.get_frame_height()
-        dl = imgui.get_window_draw_list()
-        T.draw_text(dl, "mono", 9.5, V2(p.x, p.y + (h - 12 * sc) / 2), col32(*DIM), text.upper(), 1.0)
-        imgui.dummy(V2(col_w * sc - imgui.get_style().item_spacing.x, h))
-        imgui.same_line()
-        imgui.set_next_item_width(-1)
-
-    def button(self, text, width=0.0, kind="ghost", active=False):
-        """kind: ghost | primary"""
-        sc = self.sc
-        pushed = 0
-        if kind == "primary" or active:
-            imgui.push_style_color(imgui.Col_.button, col32(*ACCENT, 1.0))
-            imgui.push_style_color(imgui.Col_.button_hovered, col32(0.92, 1.0, 0.55))
-            imgui.push_style_color(imgui.Col_.button_active, col32(0.75, 0.86, 0.35))
-            imgui.push_style_color(imgui.Col_.text, col32(0.03, 0.035, 0.03))
-            imgui.push_style_color(imgui.Col_.border, col32(*ACCENT, 1.0))
-            pushed = 5
-        else:
-            imgui.push_style_color(imgui.Col_.border, col32(1, 1, 1, 0.12))
-            pushed = 1
-        with T.use("mono_medium", 10.5):
-            clicked = imgui.button(text.upper(), V2(width, 30 * sc))
-        imgui.pop_style_color(pushed)
-        return clicked
-
-    def button_row(self, labels, kinds=None):
-        n = len(labels)
-        sp = imgui.get_style().item_spacing.x
-        w = (imgui.get_content_region_avail().x - sp * (n - 1)) / n
-        hit = None
-        for i, l in enumerate(labels):
-            if i:
-                imgui.same_line()
-            k = kinds[i] if kinds else "ghost"
-            if self.button(l, w, k):
-                hit = i
-        return hit
-
-    def pill(self, dl, pos, text, color, size=9.5, filled=False):
-        sc = self.sc
-        tw = T.tracked_width("mono_medium", size, text, 1.2)
-        dot = 10 * sc
-        w = tw + dot + 16 * sc
-        h = 20 * sc
-        a, b = pos, V2(pos.x + w, pos.y + h)
-        if filled:
-            dl.add_rect_filled(a, b, col32(*color, 0.14), h / 2)
-        dl.add_rect(a, b, col32(*color, 0.55), h / 2, 1)
-        dl.add_circle_filled(V2(a.x + 10 * sc, a.y + h / 2), 3 * sc, col32(*color))
-        T.draw_text(dl, "mono_medium", size, V2(a.x + 8 * sc + dot, a.y + (h - 12 * sc) / 2), col32(*color), text, 1.2)
-        return w
-
-    def logo(self, dl, p):
-        """A corner-pinned plane inside registration brackets."""
-        sc = self.sc
-        s = 26 * sc
-        x0, y0 = p.x, p.y
-        x1, y1 = x0 + s, y0 + s
-        L = 6 * sc
-        c = col32(*INK, 0.9)
-        for (cx, cy, dx, dy) in ((x0, y0, 1, 1), (x1, y0, -1, 1), (x1, y1, -1, -1), (x0, y1, 1, -1)):
-            dl.add_line(V2(cx, cy), V2(cx + dx * L, cy), c, 1.2 * sc)
-            dl.add_line(V2(cx, cy), V2(cx, cy + dy * L), c, 1.2 * sc)
-        q = [V2(x0 + 6.5 * sc, y0 + 8 * sc), V2(x1 - 5 * sc, y0 + 5.5 * sc),
-             V2(x1 - 7 * sc, y1 - 6 * sc), V2(x0 + 5.5 * sc, y1 - 8.5 * sc)]
-        dl.add_convex_poly_filled(q, col32(*ACCENT))
-        for v in q:
-            dl.add_rect_filled(V2(v.x - 1.3 * sc, v.y - 1.3 * sc), V2(v.x + 1.3 * sc, v.y + 1.3 * sc), col32(0.03, 0.03, 0.03))
-        return s
-
-    def card(self, height, draw_fn):
-        sc = self.sc
-        dl = imgui.get_window_draw_list()
-        a = imgui.get_cursor_screen_pos()
-        w = imgui.get_content_region_avail().x
-        b = V2(a.x + w, a.y + height * sc)
-        dl.add_rect_filled(a, b, col32(1, 1, 1, 0.028), 10 * sc)
-        dl.add_rect(a, b, col32(1, 1, 1, 0.08), 10 * sc, 1)
-        draw_fn(dl, a, b)
-        imgui.dummy(V2(w, height * sc))
-
-    # ================================================================ frame
-    def draw(self, fb_w, fb_h):
-        io = imgui.get_io()
-        sc = self.sc
-        side_w = 352 * sc
-        status_h = 30 * sc
-        flags = (imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_resize |
-                 imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_collapse |
-                 imgui.WindowFlags_.no_bring_to_front_on_focus)
-        w, h = io.display_size.x, io.display_size.y
-
-        imgui.set_next_window_pos(V2(0, 0))
-        imgui.set_next_window_size(V2(side_w, h - status_h))
-        imgui.begin("##side", None, flags)
-        self.draw_sidebar()
-        imgui.end()
-
-        imgui.set_next_window_pos(V2(side_w, 0))
-        imgui.set_next_window_size(V2(w - side_w, h - status_h))
-        imgui.push_style_var(imgui.StyleVar_.window_padding, V2(0, 0))
-        imgui.begin("##view", None, flags | imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
-        imgui.pop_style_var()
-        self.draw_view()
-        imgui.end()
-
-        imgui.set_next_window_pos(V2(0, h - status_h))
-        imgui.set_next_window_size(V2(w, status_h))
-        imgui.push_style_var(imgui.StyleVar_.window_padding, V2(0, 0))
-        imgui.begin("##status", None, flags | imgui.WindowFlags_.no_scrollbar)
-        imgui.pop_style_var()
-        self.draw_status()
-        imgui.end()
-
-        # divider between sidebar and view
-        fg = imgui.get_foreground_draw_list()
-        fg.add_line(V2(side_w, 0), V2(side_w, h - status_h), col32(1, 1, 1, 0.06), 1)
-        self.shortcuts()
-
-    # ================================================================ sidebar
-    def draw_sidebar(self):
-        p = self.project
-        app = self.app
-        sc = self.sc
-        dl = imgui.get_window_draw_list()
-
-        # ---- brand
-        o = imgui.get_cursor_screen_pos()
-        right = o.x + imgui.get_content_region_avail().x
-        s = self.logo(dl, o)
-        T.draw_text(dl, "ui_medium", 17, V2(o.x + s + 12 * sc, o.y - 1 * sc), col32(*INK), "PROJMAP", 3.2)
-        T.draw_text(dl, "mono", 8.5, V2(o.x + s + 12 * sc, o.y + 18 * sc), col32(*DIM), "PROJECTION SYSTEM", 1.6)
-        tag = "V1.0"
-        tw = T.tracked_width("mono", 8.5, tag, 1.2)
-        T.draw_text(dl, "mono", 8.5, V2(right - tw, o.y + 2 * sc), col32(*DIM), tag, 1.2)
-        imgui.dummy(V2(0, s + 14 * sc))
-
-        # ---- telemetry card
-        state, scol = self.source_state()
-        src = app.source
-
-        def tele(dl, a, b):
-            pad = 14 * sc
-            T.draw_text(dl, "mono", 8.5, V2(a.x + pad, a.y + pad), col32(*DIM), f"O{p.active_output + 1}  {p.output.name.upper()[:18]}", 1.4)
-            pw = T.tracked_width("mono_medium", 9, state, 1.2) + 26 * sc
-            self.pill(dl, V2(b.x - pad - pw, a.y + pad - 5 * sc), state, scol, 9, True)
-            big = f"{p.width}"
-            T.draw_text(dl, "light", 40, V2(a.x + pad - 2 * sc, a.y + 30 * sc), col32(*INK), big)
-            bw = T.text_size("light", 40, big).x
-            T.draw_text(dl, "ui", 12, V2(a.x + pad + bw + 6 * sc, a.y + 52 * sc), col32(*INK, 0.8), f"x {p.height}  PX")
-            name = p.path.replace("\\", "/").split("/")[-1] if p.path else "untitled"
-            name = (name[:22] + "..") if len(name) > 24 else name
-            T.draw_text(dl, "mono", 8.5, V2(b.x - pad - T.tracked_width("mono", 8.5, name.upper(), 0.8), a.y + 58 * sc),
-                        col32(*DIM), name.upper() + (" *" if app.dirty else ""), 0.8)
-            # ruler strip
-            y = b.y - 30 * sc
-            dl.add_line(V2(a.x + pad, y), V2(b.x - pad, y), col32(1, 1, 1, 0.08), 1)
-            n = 40
-            for i in range(n + 1):
-                x = a.x + pad + (b.x - a.x - 2 * pad) * i / n
-                hgt = 5 if i % 10 == 0 else 2.5
-                dl.add_line(V2(x, y), V2(x, y + hgt * sc), col32(1, 1, 1, 0.22 if i % 10 == 0 else 0.1), 1)
-            srcname = {"spout": "SPOUT", "image": "IMAGE", "test": "TEST PATTERN"}[p.source_kind]
-            if p.source_kind == "spout" and p.spout_name:
-                srcname += " / " + p.spout_name.upper()[:14]
-            T.draw_text(dl, "mono", 8.5, V2(a.x + pad, b.y - 19 * sc), col32(*DIM), "SRC  " + srcname, 1.0)
-            sw, sh = src.size if src else (0, 0)
-            r = f"{sw}x{sh}"
-            T.draw_text(dl, "mono", 8.5, V2(b.x - pad - T.tracked_width("mono", 8.5, r, 1.0), b.y - 19 * sc), col32(*DIM), r, 1.0)
-
-        self.card(128, tele)
-        imgui.dummy(V2(0, 2 * sc))
-        hit = self.button_row(["New", "Open", "Save", "Save as"])
-        if hit == 0:
-            self.new_project()
-        elif hit == 1:
-            self.open_project()
-        elif hit == 2:
-            self.save_project()
-        elif hit == 3:
-            self.save_project(True)
-
-        # ---- input
-        self.section("01", "Input")
-        kinds = ["test", "spout", "image"]
-        labels = ["Test pattern", "Spout  (Blender / AE)", "Image file"]
-        cur = kinds.index(p.source_kind) if p.source_kind in kinds else 0
-        self.label("Source")
-        ch, cur = imgui.combo("##srckind", cur, labels)
-        if ch:
-            p.source_kind = kinds[cur]
-            app.rebuild_source()
-            app.dirty = True
-        if p.source_kind == "spout":
-            self.label("Sender")
-            imgui.set_next_item_width(-64 * sc)
-            ch, p.spout_name = imgui.input_text_with_hint("##spname", "active sender", p.spout_name)
-            if imgui.is_item_deactivated_after_edit():
-                app.rebuild_source()
-                app.dirty = True
-            imgui.same_line()
-            if self.button("List", -1):
-                from .sources import list_spout_senders
-                self.spout_list = list_spout_senders()
-                imgui.open_popup("spout_list")
-            if imgui.begin_popup("spout_list"):
-                if not self.spout_list:
-                    imgui.text_disabled("No senders found")
-                for n in self.spout_list:
-                    if imgui.selectable(n, n == p.spout_name)[0]:
-                        p.spout_name = n
-                        app.rebuild_source()
-                imgui.end_popup()
-        elif p.source_kind == "image":
-            self.label("File")
-            imgui.set_next_item_width(-78 * sc)
-            imgui.input_text("##img", p.image_path, imgui.InputTextFlags_.read_only)
-            imgui.same_line()
-            if self.button("Browse", -1):
-                path = file_dialog(False, "image")
-                if path:
-                    p.image_path = path
-                    app.rebuild_source()
-                    app.dirty = True
-        self.label("Flip V")
-        ch, p.flip_input = imgui.checkbox("##flip", p.flip_input)
-        if ch:
-            app.dirty = True
-
-        self.label("Atlas")
-        ch, v = imgui.slider_int2("##atlas", [p.input_cols, p.input_rows], 1, 6, "%d")
-        if imgui.is_item_activated():
-            self.push()
-        if ch:
-            p.input_cols, p.input_rows = max(1, v[0]), max(1, v[1])
-        if imgui.is_item_hovered():
-            imgui.set_tooltip("Camera atlas layout (columns x rows). Match the Blender add-on.")
-
-        # ---- outputs
-        self.section("02", "Outputs")
-        self.output_list()
-        hit = self.button_row(["+ Output", "Del", "Match", "Open" if not app.is_open() else "Close"],
-                              ["ghost", "ghost", "ghost", "primary" if not app.is_open() else "ghost"])
-        if hit == 0:
-            self.add_output()
-        elif hit == 1:
-            self.delete_output()
-        elif hit == 2:
-            o = p.output
-            if o.mode == "fullscreen":
-                r = app.monitor_resolution(o.monitor)
-                if r:
-                    o.width, o.height = r
-            app.dirty = True
-        elif hit == 3:
-            app.toggle_output()
-        self.output_props(p.output)
-        self.label("Guides")
-        _, self.projector_guides = imgui.checkbox("##guides", self.projector_guides)
-        imgui.same_line(0, 22 * sc)
-        with T.use("mono", 9.5):
-            imgui.text_disabled("CALIB")
-        imgui.same_line()
-        _, self.calib = imgui.checkbox("##calib", self.calib)
-
-        # ---- layers
-        self.section("03", "Layers")
-        self.layer_list()
-        hit = self.button_row(["+ Surface", "+ Mask", "Dup", "Del"])
-        if hit == 0:
-            self.add_surface()
-        elif hit == 1:
-            self.add_mask()
-        elif hit == 2:
-            self.duplicate()
-        elif hit == 3:
-            self.delete_selected()
-
-        # ---- properties
-        it = self.selected()
-        if it is not None and it.output == p.active_output:
-            self.section("04", "Surface" if isinstance(it, Surface) else "Mask")
-            if isinstance(it, Surface):
-                self.surface_props(it)
-            else:
-                self.mask_props(it)
-        imgui.dummy(V2(0, 10 * sc))
-
     def add_output(self):
         from .model import Output
         self.push()
@@ -620,181 +312,6 @@ class Editor:
         if it is None or it.output != idx:
             first = next((i for i, s in enumerate(p.surfaces) if s.output == idx), None)
             self.select("surface", first if first is not None else -1)
-
-    def output_list(self):
-        sc = self.sc
-        p = self.project
-        app = self.app
-        row_h = 32 * sc
-        n = max(1, min(len(p.outputs), 4))
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, V2(0, 2 * sc))
-        imgui.begin_child("outputs", V2(0, n * (row_h + 2 * sc) + 2 * sc))
-        dl = imgui.get_window_draw_list()
-        width = imgui.get_content_region_avail().x
-        for i, o in enumerate(p.outputs):
-            imgui.push_id(f"out{i}")
-            a = imgui.get_cursor_screen_pos()
-            b = V2(a.x + width, a.y + row_h)
-            sel = p.active_output == i
-            if imgui.invisible_button("row", V2(width - 30 * sc, row_h)):
-                self.set_active_output(i)
-            hov = imgui.is_item_hovered()
-            imgui.same_line(0, 0)
-            if imgui.invisible_button("live", V2(30 * sc, row_h)):
-                app.toggle_output(i)
-            live_hov = imgui.is_item_hovered()
-            if live_hov:
-                imgui.set_tooltip("Close output" if app.is_open(i) else "Open output")
-            if sel:
-                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.05), 6 * sc)
-                dl.add_rect(a, b, col32(1, 1, 1, 0.10), 6 * sc, 1)
-            elif hov:
-                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.025), 6 * sc)
-            cy = a.y + row_h / 2
-            T.draw_text(dl, "mono", 9.5, V2(a.x + 10 * sc, cy - 6.5 * sc), col32(*(ACCENT if sel else DIM)), f"O{i + 1}")
-            x = a.x + 36 * sc
-            # little screen glyph
-            dl.add_rect(V2(x, cy - 4.5 * sc), V2(x + 11 * sc, cy + 3 * sc), col32(*INK, 0.8), 1, 1.1)
-            dl.add_line(V2(x + 3 * sc, cy + 5.5 * sc), V2(x + 8 * sc, cy + 5.5 * sc), col32(*INK, 0.8), 1.1)
-            T.draw_text(dl, "ui", 13, V2(x + 19 * sc, cy - 8.5 * sc), col32(*INK), o.name)
-            info = ("FULL " if o.mode == "fullscreen" else "WIN ") + f"{o.width}x{o.height}"
-            iw = T.tracked_width("mono", 9, info, 0.6)
-            T.draw_text(dl, "mono", 9, V2(b.x - 34 * sc - iw, cy - 6 * sc), col32(*DIM), info, 0.6)
-            ex = b.x - 15 * sc
-            if app.is_open(i):
-                dl.add_circle_filled(V2(ex, cy), 6 * sc, col32(*LIVE, 0.18))
-                dl.add_circle_filled(V2(ex, cy), 3 * sc, col32(*LIVE))
-            else:
-                dl.add_circle(V2(ex, cy), 4 * sc, col32(*(INK if live_hov else DIM)), 0, 1.1)
-            imgui.pop_id()
-        imgui.end_child()
-        imgui.pop_style_var()
-
-    def output_props(self, o):
-        sc = self.sc
-        app = self.app
-        idx = self.project.active_output
-        self.label("Name")
-        ch, o.name = imgui.input_text("##oname", o.name)
-        self.label("Mode")
-        modes = ["fullscreen", "window"]
-        ch, mi = imgui.combo("##omode", modes.index(o.mode), ["Fullscreen on display", "Free window"])
-        if ch:
-            self.push()
-            o.mode = modes[mi]
-            if o.mode == "fullscreen":
-                r = app.monitor_resolution(o.monitor)
-                if r:
-                    o.width, o.height = r
-            app.place_output(idx)
-        if o.mode == "fullscreen":
-            mons = app.monitor_names()
-            if mons:
-                self.label("Display")
-                ch, mi = imgui.combo("##mon", min(o.monitor, len(mons) - 1), mons)
-                if ch:
-                    o.monitor = mi
-                    app.place_output(idx)
-                    app.dirty = True
-            self.label("Canvas")
-            self.int_pair("##cw", "##ch", o, "width", "height", 64, 8192)
-        else:
-            self.label("Position")
-            if self.int_pair("##ox", "##oy", o, "x", "y", -10000, 10000):
-                app.place_output(idx)
-            self.label("Size")
-            if self.int_pair("##ow", "##oh", o, "width", "height", 64, 8192):
-                app.place_output(idx)
-            self.label("Window")
-            for key, text in (("borderless", "NO FRAME"), ("lock", "LOCK"), ("on_top", "ON TOP")):
-                ch, v = imgui.checkbox(f"##{key}", getattr(o, key))
-                if ch:
-                    setattr(o, key, v)
-                    app.place_output(idx)
-                    app.dirty = True
-                imgui.same_line(0, 4 * sc)
-                with T.use("mono", 9):
-                    imgui.text_disabled(text)
-                imgui.same_line(0, 10 * sc)
-            imgui.new_line()
-
-    def int_pair(self, id_a, id_b, obj, attr_a, attr_b, lo, hi):
-        sc = self.sc
-        avail = imgui.get_content_region_avail().x
-        sp = imgui.get_style().item_spacing.x
-        fw = (avail - 2 * sp - 10 * sc) / 2
-        imgui.set_next_item_width(fw)
-        ch1, a = imgui.input_int(id_a, int(getattr(obj, attr_a)), 0)
-        imgui.same_line()
-        with T.use("mono", 10):
-            imgui.text_disabled("x" if attr_a == "width" else ",")
-        imgui.same_line()
-        imgui.set_next_item_width(fw)
-        ch2, b = imgui.input_int(id_b, int(getattr(obj, attr_b)), 0)
-        if ch1 or ch2:
-            setattr(obj, attr_a, int(np.clip(a, lo, hi)))
-            setattr(obj, attr_b, int(np.clip(b, lo, hi)))
-            self.app.dirty = True
-            return True
-        return False
-
-    def layer_list(self):
-        sc = self.sc
-        p = self.project
-        ao = p.active_output
-        rows = ([("surface", i, s) for i, s in enumerate(p.surfaces) if s.output == ao] +
-                [("mask", i, m) for i, m in enumerate(p.masks) if m.output == ao])
-        row_h = 32 * sc
-        n = max(1, min(len(rows), 6))
-        imgui.push_style_var(imgui.StyleVar_.item_spacing, V2(0, 2 * sc))
-        imgui.begin_child("layers", V2(0, n * (row_h + 2 * sc) + 2 * sc))
-        dl = imgui.get_window_draw_list()
-        width = imgui.get_content_region_avail().x
-        for k, (kind, i, it) in enumerate(rows):
-            imgui.push_id(f"{kind}{i}")
-            a = imgui.get_cursor_screen_pos()
-            b = V2(a.x + width, a.y + row_h)
-            sel = self.sel_kind == kind and self.sel_index == i
-            clicked = imgui.invisible_button("row", V2(width - 30 * sc, row_h))
-            hov = imgui.is_item_hovered()
-            imgui.same_line(0, 0)
-            vis_clicked = imgui.invisible_button("vis", V2(30 * sc, row_h))
-            vis_hov = imgui.is_item_hovered()
-            if clicked:
-                self.select(kind, i)
-            if vis_clicked:
-                it.visible = not it.visible
-                it.touch()
-            if sel:
-                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.05), 6 * sc)
-                dl.add_rect(a, b, col32(1, 1, 1, 0.10), 6 * sc, 1)
-            elif hov:
-                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.025), 6 * sc)
-            color = it.color if isinstance(it, Surface) else MASK_COL
-            alpha = 1.0 if it.visible else 0.35
-            cy = a.y + row_h / 2
-            T.draw_text(dl, "mono", 9.5, V2(a.x + 10 * sc, cy - 6.5 * sc), col32(*(ACCENT if sel else DIM), alpha),
-                        f"{k + 1:02d}")
-            x = a.x + 36 * sc
-            if kind == "mask":
-                dl.add_rect(V2(x, cy - 4 * sc), V2(x + 8 * sc, cy + 4 * sc), col32(*color, alpha), 1, 1.2)
-            else:
-                dl.add_rect_filled(V2(x, cy - 4 * sc), V2(x + 8 * sc, cy + 4 * sc), col32(*color, alpha), 1)
-            T.draw_text(dl, "ui", 13, V2(x + 16 * sc, cy - 8.5 * sc), col32(*INK, alpha), it.name)
-            info = f"{it.cols}x{it.rows}" if isinstance(it, Surface) else f"{len(it.points)} PT"
-            iw = T.tracked_width("mono", 9, info, 0.6)
-            T.draw_text(dl, "mono", 9, V2(b.x - 34 * sc - iw, cy - 6 * sc), col32(*DIM, alpha), info, 0.6)
-            # visibility eye: ring + pupil
-            ex = b.x - 15 * sc
-            ec = col32(*(INK if vis_hov else DIM), 1.0 if it.visible else 0.5)
-            dl.add_circle(V2(ex, cy), 5 * sc, ec, 0, 1.1)
-            if it.visible:
-                dl.add_circle_filled(V2(ex, cy), 2 * sc, ec)
-            else:
-                dl.add_line(V2(ex - 6 * sc, cy + 6 * sc), V2(ex + 6 * sc, cy - 6 * sc), ec, 1.1)
-            imgui.pop_id()
-        imgui.end_child()
-        imgui.pop_style_var()
 
     def slider(self, label, obj, attr, lo, hi, fmt="%.2f"):
         self.label(label)
@@ -878,12 +395,538 @@ class Editor:
         self.label("Name")
         _, m.name = imgui.input_text("##name", m.name)
         self.output_combo(m)
-        with T.use("mono", 9.5):
-            imgui.text_disabled("DBL-CLICK EDGE   ADD POINT")
-            imgui.text_disabled("RIGHT-CLICK PT   REMOVE")
+        imgui.text_disabled("Double-click an edge to add a point")
+        imgui.text_disabled("Right-click a point to remove it")
+
+    # ================================================================ widgets
+    def begin_card(self, title, info=None):
+        sc = self.sc
+        dl = imgui.get_window_draw_list()
+        imgui.dummy(V2(0, 6 * sc))
+        dl.channels_split(2)
+        dl.channels_set_current(1)
+        a = imgui.get_cursor_screen_pos()
+        self._card = (dl, a)
+        imgui.dummy(V2(0, 2 * sc))
+        p = imgui.get_cursor_screen_pos()
+        T.draw_text(dl, "ui_medium", 10.5, p, col32(*DIM), title.upper(), 2.2)
+        if info:
+            right = p.x + imgui.get_content_region_avail().x
+            iw = T.text_size("ui", 11.5, info).x
+            T.draw_text(dl, "ui", 11.5, V2(right - iw, p.y - 1 * sc), col32(*FAINT), info)
+        imgui.dummy(V2(0, 16 * sc))
+
+    def end_card(self):
+        sc = self.sc
+        dl, a = self._card
+        imgui.dummy(V2(0, 2 * sc))
+        pad = 15 * sc
+        b = imgui.get_cursor_screen_pos()
+        w = imgui.get_content_region_avail().x
+        dl.channels_set_current(0)
+        T.glass(dl, V2(a.x - pad, a.y - pad), V2(a.x + w + pad, b.y + pad - 8 * sc), 20 * sc)
+        dl.channels_merge()
+        imgui.dummy(V2(0, 14 * sc))
+
+    def label(self, text, col_w=82):
+        sc = self.sc
+        p = imgui.get_cursor_screen_pos()
+        h = imgui.get_frame_height()
+        dl = imgui.get_window_draw_list()
+        T.draw_text(dl, "ui", 12.5, V2(p.x, p.y + (h - 16 * sc) / 2), col32(*DIM), text)
+        imgui.dummy(V2(col_w * sc - imgui.get_style().item_spacing.x, h))
+        imgui.same_line()
+        imgui.set_next_item_width(-1)
+
+    def toggle(self, sid, value):
+        """iOS-style glass switch. Returns (changed, value)."""
+        sc = self.sc
+        dl = imgui.get_window_draw_list()
+        h = 22 * sc
+        w = 40 * sc
+        p = imgui.get_cursor_screen_pos()
+        fh = imgui.get_frame_height()
+        y = p.y + (fh - h) / 2
+        imgui.invisible_button(sid, V2(w, fh))
+        clicked = imgui.is_item_clicked()
+        hov = imgui.is_item_hovered()
+        if clicked:
+            value = not value
+        a, b = V2(p.x, y), V2(p.x + w, y + h)
+        if value:
+            T.gradient_fill(dl, a, b, h / 2, col32(*ACCENT, 0.95), col32(0.42, 0.40, 0.98, 0.95), a, V2(b.x, a.y))
+            T.glow(dl, V2(b.x - h / 2, y + h / 2), h * 1.2, ACCENT, 0.8)
+        else:
+            dl.add_rect_filled(a, b, col32(1, 1, 1, 0.09 if hov else 0.06), h / 2)
+        dl.add_rect(a, b, col32(1, 1, 1, 0.14), h / 2, 1)
+        kx = b.x - h / 2 if value else a.x + h / 2
+        dl.add_circle_filled(V2(kx, y + h / 2 + 1.5 * sc), h / 2 - 2 * sc, col32(0, 0, 0.05, 0.35), 24)
+        dl.add_circle_filled(V2(kx, y + h / 2), h / 2 - 3 * sc, col32(0.97, 0.97, 1.0), 24)
+        return clicked, value
+
+    def button(self, text, width=0.0, kind="ghost", active=False):
+        """kind: ghost | primary | danger"""
+        sc = self.sc
+        dl = imgui.get_window_draw_list()
+        h = 32 * sc
+        if width <= 0:
+            width = imgui.get_content_region_avail().x if width < 0 else T.text_size("ui_medium", 12.5, text).x + 30 * sc
+        p = imgui.get_cursor_screen_pos()
+        clicked = imgui.invisible_button("##b" + text, V2(width, h))
+        hov = imgui.is_item_hovered()
+        down = imgui.is_item_active()
+        a, b = p, V2(p.x + width, p.y + h)
+        r = h / 2
+        if kind == "primary" or active:
+            T.shadow(dl, a, b, r, 0.8, (0.25, 0.15, 0.7), 4)
+            c0 = (0.66, 0.58, 1.0) if not down else (0.52, 0.46, 0.92)
+            c1 = (0.43, 0.38, 0.98) if not down else (0.36, 0.32, 0.86)
+            if hov and not down:
+                c0, c1 = T.mix(c0, (1, 1, 1), 0.12), T.mix(c1, (1, 1, 1), 0.12)
+            T.gradient_fill(dl, a, b, r, col32(*c0), col32(*c1), a, V2(b.x, b.y))
+            dl.add_rect(a, b, col32(1, 1, 1, 0.25), r, 1)
+            dl.add_line(V2(a.x + r, a.y + 1), V2(b.x - r, a.y + 1), col32(1, 1, 1, 0.45), 1)
+            tc = col32(1, 1, 1)
+        else:
+            fill = 0.12 if down else (0.09 if hov else 0.055)
+            dl.add_rect_filled(a, b, col32(1, 1, 1, fill), r)
+            dl.add_rect(a, b, col32(1, 1, 1, 0.13 if hov else 0.09), r, 1)
+            dl.add_line(V2(a.x + r, a.y + 0.6), V2(b.x - r, a.y + 0.6), col32(1, 1, 1, 0.16), 1)
+            tc = col32(*INK) if kind != "danger" else col32(1.0, 0.55, 0.6)
+        ts = T.text_size("ui_medium", 12.5, text)
+        T.draw_text(dl, "ui_medium", 12.5, V2(a.x + (width - ts.x) / 2, a.y + (h - ts.y) / 2), tc, text)
+        return clicked
+
+    def button_row(self, labels, kinds=None):
+        n = len(labels)
+        sp = imgui.get_style().item_spacing.x
+        w = (imgui.get_content_region_avail().x - sp * (n - 1)) / n
+        hit = None
+        for i, l in enumerate(labels):
+            if i:
+                imgui.same_line()
+            imgui.push_id(i)
+            if self.button(l, w, kinds[i] if kinds else "ghost"):
+                hit = i
+            imgui.pop_id()
+        return hit
+
+    def pill(self, dl, pos, text, color, size=11.5, filled=True, backing=False):
+        sc = self.sc
+        tw = T.text_size("ui_medium", size, text).x
+        h = 24 * sc
+        w = tw + 34 * sc
+        a, b = pos, V2(pos.x + w, pos.y + h)
+        if backing:
+            dl.add_rect_filled(a, b, col32(0.03, 0.03, 0.07, 0.82), h / 2)
+        dl.add_rect_filled(a, b, col32(*color, 0.13), h / 2)
+        dl.add_rect(a, b, col32(*color, 0.35), h / 2, 1)
+        c = V2(a.x + 13 * sc, a.y + h / 2)
+        T.glow(dl, c, 12 * sc, color, 1.2)
+        dl.add_circle_filled(c, 3.5 * sc, col32(*color), 16)
+        T.draw_text(dl, "ui_medium", size, V2(a.x + 23 * sc, a.y + (h - 15 * sc) / 2), col32(*color), text)
+        return w
+
+    def pill_width(self, text, size=11.5):
+        return T.text_size("ui_medium", size, text).x + 34 * self.sc
+
+    def logo(self, dl, p):
+        """Glass app-icon tile with a corner-pinned plane inside."""
+        sc = self.sc
+        s = 36 * sc
+        a, b = p, V2(p.x + s, p.y + s)
+        r = 11 * sc
+        T.shadow(dl, a, b, r, 1.0, (0.2, 0.1, 0.6), 4)
+        T.gradient_fill(dl, a, b, r, col32(0.62, 0.52, 1.0), col32(0.30, 0.80, 0.82), a, b)
+        dl.add_rect(a, b, col32(1, 1, 1, 0.35), r, 1)
+        dl.add_line(V2(a.x + r, a.y + 1), V2(b.x - r, a.y + 1), col32(1, 1, 1, 0.6), 1)
+        q = [V2(a.x + 9 * sc, a.y + 11 * sc), V2(b.x - 8 * sc, a.y + 8.5 * sc),
+             V2(b.x - 10 * sc, b.y - 9 * sc), V2(a.x + 8 * sc, b.y - 11.5 * sc)]
+        dl.add_convex_poly_filled(q, col32(1, 1, 1, 0.92))
+        for v in q:
+            dl.add_circle_filled(v, 2.2 * sc, col32(0.30, 0.26, 0.70), 12)
+        return s
+
+    # ================================================================ frame
+    def draw(self, fb_w, fb_h):
+        io = imgui.get_io()
+        sc = self.sc
+        side_w = 360 * sc
+        status_h = 54 * sc
+        m = 14 * sc
+        flags = (imgui.WindowFlags_.no_title_bar | imgui.WindowFlags_.no_resize |
+                 imgui.WindowFlags_.no_move | imgui.WindowFlags_.no_collapse |
+                 imgui.WindowFlags_.no_bring_to_front_on_focus | imgui.WindowFlags_.no_background)
+        w, h = io.display_size.x, io.display_size.y
+
+        imgui.set_next_window_pos(V2(0, 0))
+        imgui.set_next_window_size(V2(side_w, h - status_h))
+        imgui.begin("##side", None, flags)
+        self.draw_sidebar()
+        imgui.end()
+
+        imgui.set_next_window_pos(V2(side_w - 6 * sc, 0))
+        imgui.set_next_window_size(V2(w - side_w + 6 * sc, h - status_h))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, V2(0, 0))
+        imgui.begin("##view", None, flags | imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
+        imgui.pop_style_var()
+        self.draw_view(m)
+        imgui.end()
+
+        imgui.set_next_window_pos(V2(0, h - status_h))
+        imgui.set_next_window_size(V2(w, status_h))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, V2(0, 0))
+        imgui.begin("##status", None, flags | imgui.WindowFlags_.no_scrollbar)
+        imgui.pop_style_var()
+        self.draw_status(m)
+        imgui.end()
+        self.shortcuts()
+
+    # ================================================================ sidebar
+    def draw_sidebar(self):
+        p = self.project
+        app = self.app
+        sc = self.sc
+        dl = imgui.get_window_draw_list()
+
+        # ---- brand
+        o = imgui.get_cursor_screen_pos()
+        s = self.logo(dl, V2(o.x - 4 * sc, o.y))
+        T.draw_text(dl, "ui_medium", 19, V2(o.x + s + 8 * sc, o.y - 1 * sc), col32(*INK), "ProjMap")
+        T.draw_text(dl, "ui", 12, V2(o.x + s + 8 * sc, o.y + 21 * sc), col32(*DIM), "Projection mapping studio")
+        imgui.dummy(V2(0, s + 18 * sc))
+
+        # ---- telemetry
+        state, scol = self.source_state()
+        src = app.source
+        self.begin_card(f"Output {p.active_output + 1}", p.output.name)
+        a = imgui.get_cursor_screen_pos()
+        wcard = imgui.get_content_region_avail().x
+        big = f"{p.width}"
+        T.draw_text(dl, "light", 44, V2(a.x - 2 * sc, a.y - 8 * sc), col32(*INK), big)
+        bw = T.text_size("light", 44, big).x
+        T.draw_text(dl, "light", 20, V2(a.x + bw + 6 * sc, a.y + 13 * sc), col32(*DIM), f"/ {p.height}")
+        pw = self.pill_width(state)
+        self.pill(dl, V2(a.x + wcard - pw, a.y + 6 * sc), state, scol)
+        imgui.dummy(V2(0, 50 * sc))
+        # fps capsule
+        a = imgui.get_cursor_screen_pos()
+        fps = imgui.get_io().framerate
+        bw = wcard * 0.58
+        ch = 10 * sc
+        dl.add_rect_filled(a, V2(a.x + bw, a.y + ch), col32(1, 1, 1, 0.07), ch / 2)
+        fill = max(ch, bw * min(fps / 60.0, 1.0))
+        T.gradient_fill(dl, a, V2(a.x + fill, a.y + ch), ch / 2, col32(*ACCENT_2, 0.9), col32(0.50, 0.62, 1.0, 0.9),
+                        a, V2(a.x + fill, a.y))
+        T.draw_text(dl, "ui", 12, V2(a.x + bw + 10 * sc, a.y - 3 * sc), col32(*DIM), f"{fps:.0f} / 60 fps")
+        imgui.dummy(V2(0, ch + 10 * sc))
+        srcname = {"spout": "Spout", "image": "Image", "test": "Test pattern"}[p.source_kind]
+        if p.source_kind == "spout" and p.spout_name:
+            srcname += " - " + p.spout_name[:16]
+        sw, sh = src.size if src else (0, 0)
+        a = imgui.get_cursor_screen_pos()
+        T.draw_text(dl, "ui", 12, a, col32(*DIM), srcname)
+        r = f"{sw} x {sh}"
+        T.draw_text(dl, "ui", 12, V2(a.x + wcard - T.text_size("ui", 12, r).x, a.y), col32(*FAINT), r)
+        imgui.dummy(V2(0, 16 * sc))
+        gpu = getattr(app, "gpu_name", "")
+        if gpu:
+            a = imgui.get_cursor_screen_pos()
+            T.draw_text(dl, "ui", 11, a, col32(*FAINT), "GPU  " + gpu[:42])
+            imgui.dummy(V2(0, 14 * sc))
+        self.end_card()
+
+        hit = self.button_row(["New", "Open", "Save", "Save as"])
+        if hit == 0:
+            self.new_project()
+        elif hit == 1:
+            self.open_project()
+        elif hit == 2:
+            self.save_project()
+        elif hit == 3:
+            self.save_project(True)
+        name = p.path.replace("\\", "/").split("/")[-1] if p.path else "Untitled project"
+        a = imgui.get_cursor_screen_pos()
+        T.draw_text(dl, "ui", 11.5, V2(a.x + 4 * sc, a.y), col32(*FAINT), name + ("  - unsaved" if app.dirty else ""))
+        imgui.dummy(V2(0, 22 * sc))
+
+        # ---- input
+        self.begin_card("Input")
+        kinds = ["test", "spout", "image"]
+        labels = ["Test pattern", "Spout  (Blender / AE)", "Image file"]
+        cur = kinds.index(p.source_kind) if p.source_kind in kinds else 0
+        self.label("Source")
+        ch, cur = imgui.combo("##srckind", cur, labels)
+        if ch:
+            p.source_kind = kinds[cur]
+            app.rebuild_source()
+            app.dirty = True
+        if p.source_kind == "spout":
+            self.label("Sender")
+            imgui.set_next_item_width(-70 * sc)
+            ch, p.spout_name = imgui.input_text_with_hint("##spname", "Any active sender", p.spout_name)
+            if imgui.is_item_deactivated_after_edit():
+                app.rebuild_source()
+                app.dirty = True
+            imgui.same_line()
+            if self.button("List", -1):
+                from .sources import list_spout_senders
+                self.spout_list = list_spout_senders()
+                imgui.open_popup("spout_list")
+            if imgui.begin_popup("spout_list"):
+                if not self.spout_list:
+                    imgui.text_disabled("No senders found")
+                for n in self.spout_list:
+                    if imgui.selectable(n, n == p.spout_name)[0]:
+                        p.spout_name = n
+                        app.rebuild_source()
+                imgui.end_popup()
+        elif p.source_kind == "image":
+            self.label("File")
+            imgui.set_next_item_width(-84 * sc)
+            imgui.input_text("##img", p.image_path, imgui.InputTextFlags_.read_only)
+            imgui.same_line()
+            if self.button("Browse", -1):
+                path = file_dialog(False, "image")
+                if path:
+                    p.image_path = path
+                    app.rebuild_source()
+                    app.dirty = True
+        self.label("Atlas")
+        ch, v = imgui.slider_int2("##atlas", [p.input_cols, p.input_rows], 1, 6, "%d")
+        if imgui.is_item_activated():
+            self.push()
+        if ch:
+            p.input_cols, p.input_rows = max(1, v[0]), max(1, v[1])
+        if imgui.is_item_hovered():
+            imgui.set_tooltip("Camera atlas layout (columns x rows). Match the Blender add-on.")
+        self.label("Flip")
+        ch, p.flip_input = self.toggle("##flip", p.flip_input)
+        if ch:
+            app.dirty = True
+        self.end_card()
+
+        # ---- outputs
+        self.begin_card("Outputs", f"{app.open_count()} live")
+        self.output_list()
+        live = app.is_open()
+        hit = self.button_row(["+ Output", "Remove", "Show" if not live else "Hide"],
+                              ["ghost", "ghost", "primary" if not live else "ghost"])
+        if hit == 0:
+            self.add_output()
+        elif hit == 1:
+            self.delete_output()
+        elif hit == 2:
+            app.toggle_output()
+        imgui.dummy(V2(0, 2 * sc))
+        self.output_props(p.output)
+        self.label("Guides")
+        _, self.projector_guides = self.toggle("##guides", self.projector_guides)
+        imgui.same_line(0, 18 * sc)
+        cp = imgui.get_cursor_screen_pos()
+        T.draw_text(dl, "ui", 12.5, V2(cp.x, cp.y + (imgui.get_frame_height() - 16 * sc) / 2), col32(*DIM), "Calibrate")
+        imgui.dummy(V2(T.text_size("ui", 12.5, "Calibrate").x + 4 * sc, imgui.get_frame_height()))
+        imgui.same_line()
+        _, self.calib = self.toggle("##calib", self.calib)
+        self.end_card()
+
+        # ---- layers
+        self.begin_card("Layers")
+        self.layer_list()
+        hit = self.button_row(["+ Surface", "+ Mask", "Duplicate", "Delete"],
+                              ["ghost", "ghost", "ghost", "danger"])
+        if hit == 0:
+            self.add_surface()
+        elif hit == 1:
+            self.add_mask()
+        elif hit == 2:
+            self.duplicate()
+        elif hit == 3:
+            self.delete_selected()
+        self.end_card()
+
+        # ---- properties
+        it = self.selected()
+        if it is not None and it.output == p.active_output:
+            self.begin_card("Surface" if isinstance(it, Surface) else "Mask", it.name)
+            if isinstance(it, Surface):
+                self.surface_props(it)
+            else:
+                self.mask_props(it)
+            self.end_card()
+        imgui.dummy(V2(0, 6 * sc))
+
+    def _row(self, dl, a, b, sel, hov, color, name, info, dim=False, live=None, eye=None, eye_hov=False):
+        sc = self.sc
+        r = (b.y - a.y) / 2
+        alpha = 0.4 if dim else 1.0
+        if sel:
+            T.gradient_fill(dl, a, b, r, col32(*T.mix(color, (1, 1, 1), 0.6), 0.13), col32(1, 1, 1, 0.05), a, V2(b.x, a.y))
+            dl.add_rect(a, b, col32(1, 1, 1, 0.16), r, 1)
+        elif hov:
+            dl.add_rect_filled(a, b, col32(1, 1, 1, 0.045), r)
+        cy = a.y + r
+        cx = a.x + 17 * sc
+        if sel:
+            T.glow(dl, V2(cx, cy), 16 * sc, color, 1.4)
+        dl.add_circle_filled(V2(cx, cy), 4.5 * sc, col32(*color, alpha), 16)
+        T.draw_text(dl, "ui_medium" if sel else "ui", 13, V2(a.x + 32 * sc, cy - 8.5 * sc), col32(*INK, alpha), name)
+        iw = T.text_size("ui", 11.5, info).x
+        T.draw_text(dl, "ui", 11.5, V2(b.x - 40 * sc - iw, cy - 7.5 * sc), col32(*DIM, alpha), info)
+        ex = b.x - 18 * sc
+        ring = 9 * sc
+        if live is not None:
+            if live:
+                T.glow(dl, V2(ex, cy), 16 * sc, LIVE, 1.6)
+                dl.add_circle_filled(V2(ex, cy), ring, col32(*LIVE, 0.16), 24)
+                dl.add_circle(V2(ex, cy), ring, col32(*LIVE, 0.6), 24, 1.2)
+                dl.add_circle_filled(V2(ex, cy), 3.5 * sc, col32(*LIVE), 16)
+            else:
+                dl.add_circle(V2(ex, cy), ring, col32(1, 1, 1, 0.30 if eye_hov else 0.16), 24, 1.2)
+                dl.add_circle_filled(V2(ex, cy), 2.5 * sc, col32(*DIM, 0.8), 12)
+        elif eye is not None:
+            dl.add_circle(V2(ex, cy), ring, col32(1, 1, 1, 0.30 if eye_hov else 0.16), 24, 1.2)
+            if eye:
+                dl.add_circle_filled(V2(ex, cy), 3.5 * sc, col32(*INK, 0.9), 16)
+            else:
+                dl.add_line(V2(ex - 5 * sc, cy + 5 * sc), V2(ex + 5 * sc, cy - 5 * sc), col32(*DIM), 1.2)
+
+    def output_list(self):
+        sc = self.sc
+        p = self.project
+        app = self.app
+        row_h = 36 * sc
+        dl = imgui.get_window_draw_list()
+        width = imgui.get_content_region_avail().x
+        for i, o in enumerate(p.outputs):
+            imgui.push_id(f"out{i}")
+            a = imgui.get_cursor_screen_pos()
+            b = V2(a.x + width, a.y + row_h)
+            if imgui.invisible_button("row", V2(width - 36 * sc, row_h)):
+                self.set_active_output(i)
+            hov = imgui.is_item_hovered()
+            imgui.same_line(0, 0)
+            if imgui.invisible_button("live", V2(36 * sc, row_h)):
+                app.toggle_output(i)
+            live_hov = imgui.is_item_hovered()
+            if live_hov:
+                imgui.set_tooltip("Hide output" if app.is_open(i) else "Show output")
+            info = ("Fullscreen " if o.mode == "fullscreen" else "Window ") + f"{o.width}x{o.height}"
+            self._row(dl, a, b, p.active_output == i, hov, ACCENT_2, o.name, info,
+                      live=app.is_open(i), eye_hov=live_hov)
+            imgui.pop_id()
+        imgui.dummy(V2(0, 2 * sc))
+
+    def layer_list(self):
+        sc = self.sc
+        p = self.project
+        ao = p.active_output
+        rows = ([("surface", i, s) for i, s in enumerate(p.surfaces) if s.output == ao] +
+                [("mask", i, m) for i, m in enumerate(p.masks) if m.output == ao])
+        row_h = 36 * sc
+        n = max(1, min(len(rows), 6))
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, V2(0, 3 * sc))
+        imgui.begin_child("layers", V2(0, n * (row_h + 3 * sc) + 2 * sc), 0, imgui.WindowFlags_.no_background)
+        dl = imgui.get_window_draw_list()
+        width = imgui.get_content_region_avail().x
+        if not rows:
+            a = imgui.get_cursor_screen_pos()
+            T.draw_text(dl, "ui", 12.5, V2(a.x + 4 * sc, a.y + 10 * sc), col32(*FAINT), "No surfaces on this output yet")
+        for kind, i, it in rows:
+            imgui.push_id(f"{kind}{i}")
+            a = imgui.get_cursor_screen_pos()
+            b = V2(a.x + width, a.y + row_h)
+            if imgui.invisible_button("row", V2(width - 36 * sc, row_h)):
+                self.select(kind, i)
+            hov = imgui.is_item_hovered()
+            imgui.same_line(0, 0)
+            if imgui.invisible_button("vis", V2(36 * sc, row_h)):
+                it.visible = not it.visible
+                it.touch()
+            eye_hov = imgui.is_item_hovered()
+            color = it.color if isinstance(it, Surface) else MASK_COL
+            info = (f"{it.cols} x {it.rows} mesh" if (it.cols > 1 or it.rows > 1) else "Corner pin") \
+                if isinstance(it, Surface) else f"Mask - {len(it.points)} pts"
+            self._row(dl, a, b, self.sel_kind == kind and self.sel_index == i, hov, color, it.name, info,
+                      dim=not it.visible, eye=it.visible, eye_hov=eye_hov)
+            imgui.pop_id()
+        imgui.end_child()
+        imgui.pop_style_var()
+
+    def output_props(self, o):
+        sc = self.sc
+        app = self.app
+        idx = self.project.active_output
+        self.label("Name")
+        ch, o.name = imgui.input_text("##oname", o.name)
+        self.label("Mode")
+        modes = ["fullscreen", "window"]
+        ch, mi = imgui.combo("##omode", modes.index(o.mode), ["Fullscreen on display", "Free window"])
+        if ch:
+            self.push()
+            o.mode = modes[mi]
+            if o.mode == "fullscreen":
+                r = app.monitor_resolution(o.monitor)
+                if r:
+                    o.width, o.height = r
+            app.place_output(idx)
+        if o.mode == "fullscreen":
+            mons = app.monitor_names()
+            if mons:
+                self.label("Display")
+                ch, mi = imgui.combo("##mon", min(o.monitor, len(mons) - 1), mons)
+                if ch:
+                    o.monitor = mi
+                    app.place_output(idx)
+                    app.dirty = True
+            self.label("Canvas")
+            imgui.set_next_item_width(-1)
+            avail = imgui.get_content_region_avail().x
+            imgui.push_item_width(avail - 72 * sc)
+            self.int_pair("##cw", "##ch", o, "width", "height", 64, 8192, avail - 72 * sc)
+            imgui.pop_item_width()
+            imgui.same_line()
+            if self.button("Match", -1):
+                r = app.monitor_resolution(o.monitor)
+                if r:
+                    o.width, o.height = r
+                    app.dirty = True
+        else:
+            self.label("Position")
+            if self.int_pair("##ox", "##oy", o, "x", "y", -10000, 10000):
+                app.place_output(idx)
+            self.label("Size")
+            if self.int_pair("##ow", "##oh", o, "width", "height", 64, 8192):
+                app.place_output(idx)
+            for key, text in (("borderless", "No frame"), ("lock", "Lock size"), ("on_top", "On top")):
+                self.label(text)
+                ch, v = self.toggle(f"##{key}", getattr(o, key))
+                if ch:
+                    setattr(o, key, v)
+                    app.place_output(idx)
+                    app.dirty = True
+
+    def int_pair(self, id_a, id_b, obj, attr_a, attr_b, lo, hi, total=None):
+        sc = self.sc
+        avail = total if total else imgui.get_content_region_avail().x
+        sp = imgui.get_style().item_spacing.x
+        fw = (avail - 2 * sp - 8 * sc) / 2
+        imgui.set_next_item_width(fw)
+        ch1, a = imgui.input_int(id_a, int(getattr(obj, attr_a)), 0)
+        imgui.same_line()
+        imgui.text_disabled("x" if attr_a == "width" else ",")
+        imgui.same_line()
+        imgui.set_next_item_width(fw)
+        ch2, b = imgui.input_int(id_b, int(getattr(obj, attr_b)), 0)
+        if ch1 or ch2:
+            setattr(obj, attr_a, int(np.clip(a, lo, hi)))
+            setattr(obj, attr_b, int(np.clip(b, lo, hi)))
+            self.app.dirty = True
+            return True
+        return False
 
     # ================================================================ view
-    def draw_view(self):
+    def draw_view(self, m=14.0):
         sc = self.sc
         if self.tab_request:
             self.tab = self.tab_request
@@ -891,40 +934,45 @@ class Editor:
         dl = imgui.get_window_draw_list()
         wp = imgui.get_window_pos()
         ww = imgui.get_window_width()
-        bar_h = 52 * sc
+        wh = imgui.get_window_height()
+        a = V2(wp.x + 6 * sc, wp.y + m)
+        b = V2(wp.x + ww - m, wp.y + wh - 4 * sc)
+        T.glass(dl, a, b, 22 * sc, 0.9)
+        bar_h = 60 * sc
 
         # ---- top bar
-        dl.add_line(V2(wp.x, wp.y + bar_h), V2(wp.x + ww, wp.y + bar_h), col32(1, 1, 1, 0.06), 1)
-        seg_w = self.segmented(V2(wp.x + 18 * sc, wp.y + 12 * sc))
+        seg_w = self.segmented(V2(a.x + 16 * sc, a.y + 14 * sc))
         p = self.project
         o = p.output
-        lab = f"O{p.active_output + 1}  {o.name.upper()}"
-        x0 = wp.x + 18 * sc + seg_w + 18 * sc
-        T.draw_text(dl, "mono_medium", 9.5, V2(x0, wp.y + 21 * sc), col32(*INK), lab, 1.2)
-        x0 += T.tracked_width("mono_medium", 9.5, lab, 1.2) + 12 * sc
+        x0 = a.x + 16 * sc + seg_w + 18 * sc
+        T.draw_text(dl, "ui_medium", 14, V2(x0, a.y + 22 * sc), col32(*INK), o.name)
+        x0 += T.text_size("ui_medium", 14, o.name).x + 12 * sc
         live = self.app.is_open()
-        T.draw_text(dl, "mono", 9.5, V2(x0, wp.y + 21 * sc), col32(*(LIVE if live else DIM)),
-                    ("LIVE  " if live else "OFF  ") + f"{o.width}x{o.height}", 1.2)
+        self.pill(dl, V2(x0, a.y + 19 * sc), ("Live  " if live else "Hidden  ") + f"{o.width} x {o.height}",
+                  LIVE if live else DIM)
         canvas = self.out_canvas if self.tab == "output" else self.in_canvas
-        x = wp.x + ww - 18 * sc
-        x = self.top_toggle("guides", "GUIDES", self.projector_guides, x, wp.y + 12 * sc)
+        y = a.y + 14 * sc
+        x = b.x - 16 * sc
+        x = self.top_toggle("guides", "Guides", self.projector_guides, x, y)
         if x[1]:
             self.projector_guides = not self.projector_guides
-        x = self.top_toggle("calib", "CALIB", self.calib, x[0] - 8 * sc, wp.y + 12 * sc)
+        x = self.top_toggle("calib", "Calibrate", self.calib, x[0] - 8 * sc, y)
         if x[1]:
             self.calib = not self.calib
-        x = self.top_toggle("fit", "FIT", False, x[0] - 8 * sc, wp.y + 12 * sc)
+        x = self.top_toggle("fit", "Fit", False, x[0] - 8 * sc, y)
         if x[1]:
             canvas.reset()
-        z = f"ZOOM {canvas.zoom * 100:03.0f}%"
-        zw = T.tracked_width("mono", 9.5, z, 1.2)
-        T.draw_text(dl, "mono", 9.5, V2(x[0] - 16 * sc - zw, wp.y + 21 * sc), col32(*DIM), z, 1.2)
+        z = f"{canvas.zoom * 100:.0f}%"
+        zw = T.text_size("ui", 12.5, z).x
+        T.draw_text(dl, "ui", 12.5, V2(x[0] - 14 * sc - zw, y + 7 * sc), col32(*DIM), z)
 
-        # ---- canvas
-        pos = V2(wp.x, wp.y + bar_h + 1)
-        size = V2(ww, imgui.get_window_height() - bar_h - 1)
+        # ---- canvas well
+        pos = V2(a.x + 12 * sc, a.y + bar_h)
+        size = V2(b.x - a.x - 24 * sc, b.y - a.y - bar_h - 12 * sc)
+        r = 16 * sc
+        dl.add_rect_filled(pos, V2(pos.x + size.x, pos.y + size.y), col32(0.012, 0.012, 0.022, 0.92), r)
+        dl.add_rect(pos, V2(pos.x + size.x, pos.y + size.y), col32(1, 1, 1, 0.06), r, 1)
         dl.push_clip_rect(pos, V2(pos.x + size.x, pos.y + size.y), True)
-        self.dot_grid(dl, pos, size)
         if self.tab == "output":
             self.output_view(dl, pos, size)
         else:
@@ -934,58 +982,237 @@ class Editor:
     def segmented(self, p):
         sc = self.sc
         dl = imgui.get_window_draw_list()
-        h = 28 * sc
-        items = [("output", "OUTPUT"), ("input", "INPUT")]
-        widths = [T.tracked_width("mono_medium", 10, l, 1.6) + 32 * sc for _, l in items]
-        total = sum(widths) + 6 * sc
-        dl.add_rect(p, V2(p.x + total, p.y + h), col32(1, 1, 1, 0.14), h / 2, 1)
-        x = p.x + 3 * sc
+        h = 34 * sc
+        items = [("output", "Output"), ("input", "Input")]
+        widths = [T.text_size("ui_medium", 13, l).x + 40 * sc for _, l in items]
+        total = sum(widths) + 8 * sc
+        dl.add_rect_filled(p, V2(p.x + total, p.y + h), col32(0, 0, 0, 0.25), h / 2)
+        dl.add_rect(p, V2(p.x + total, p.y + h), col32(1, 1, 1, 0.10), h / 2, 1)
+        x = p.x + 4 * sc
         for (key, lab), w in zip(items, widths):
-            imgui.set_cursor_screen_pos(V2(x, p.y + 3 * sc))
-            if imgui.invisible_button("seg_" + key, V2(w, h - 6 * sc)):
+            imgui.set_cursor_screen_pos(V2(x, p.y + 4 * sc))
+            if imgui.invisible_button("seg_" + key, V2(w, h - 8 * sc)):
                 self.tab = key
                 self.drag = None
             on = self.tab == key
-            a, b = V2(x, p.y + 3 * sc), V2(x + w, p.y + h - 3 * sc)
+            a, b = V2(x, p.y + 4 * sc), V2(x + w, p.y + h - 4 * sc)
             if on:
-                dl.add_rect_filled(a, b, col32(*INK), (h - 6 * sc) / 2)
+                T.glass(dl, a, b, (h - 8 * sc) / 2, 1.6, drop=False)
+                dl.add_rect_filled(V2(x + w / 2 - 9 * sc, b.y - 3 * sc), V2(x + w / 2 + 9 * sc, b.y - 1.5 * sc),
+                                   col32(*ACCENT), 2)
             elif imgui.is_item_hovered():
-                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.06), (h - 6 * sc) / 2)
-            T.draw_text(dl, "mono_medium", 10, V2(x + 16 * sc, p.y + 8 * sc),
-                        col32(0.03, 0.03, 0.03) if on else col32(*DIM), lab, 1.6)
+                dl.add_rect_filled(a, b, col32(1, 1, 1, 0.05), (h - 8 * sc) / 2)
+            ts = T.text_size("ui_medium", 13, lab)
+            T.draw_text(dl, "ui_medium", 13, V2(x + (w - ts.x) / 2, p.y + (h - ts.y) / 2 - 1 * sc),
+                        col32(*(INK if on else DIM)), lab)
             x += w
         return total
 
     def top_toggle(self, sid, text, on, right_x, y):
         sc = self.sc
         dl = imgui.get_window_draw_list()
-        h = 28 * sc
-        w = T.tracked_width("mono_medium", 9.5, text, 1.4) + 26 * sc
-        a = V2(right_x - w, y)
-        b = V2(right_x, y + h)
+        h = 32 * sc
+        w = T.text_size("ui_medium", 12.5, text).x + 30 * sc
+        a = V2(right_x - w, y + 1 * sc)
+        b = V2(right_x, y + 1 * sc + h)
         imgui.set_cursor_screen_pos(a)
         clicked = imgui.invisible_button("tt_" + sid, V2(w, h))
         hov = imgui.is_item_hovered()
         if on:
-            dl.add_rect_filled(a, b, col32(*ACCENT, 0.12), h / 2)
-            dl.add_rect(a, b, col32(*ACCENT, 0.8), h / 2, 1)
+            T.gradient_fill(dl, a, b, h / 2, col32(*ACCENT, 0.32), col32(0.40, 0.38, 0.95, 0.20), a, V2(b.x, b.y))
+            dl.add_rect(a, b, col32(*T.mix(ACCENT, (1, 1, 1), 0.3), 0.6), h / 2, 1)
         else:
-            dl.add_rect(a, b, col32(1, 1, 1, 0.2 if hov else 0.12), h / 2, 1)
-        T.draw_text(dl, "mono_medium", 9.5, V2(a.x + 13 * sc, a.y + 8 * sc),
-                    col32(*(ACCENT if on else (INK if hov else DIM))), text, 1.4)
+            dl.add_rect_filled(a, b, col32(1, 1, 1, 0.08 if hov else 0.045), h / 2)
+            dl.add_rect(a, b, col32(1, 1, 1, 0.11), h / 2, 1)
+        ts = T.text_size("ui_medium", 12.5, text)
+        T.draw_text(dl, "ui_medium", 12.5, V2(a.x + (w - ts.x) / 2, a.y + (h - ts.y) / 2),
+                    col32(*(INK if (on or hov) else DIM)), text)
         return a.x, clicked
 
-    def dot_grid(self, dl, pos, size):
+    def _frame(self, dl, canvas, tex, uv_flip):
+        a = canvas.v((0, 0))
+        b = canvas.v((1, 1))
+        T.shadow(dl, a, b, 0, 1.2, offset=8)
+        dl.add_rect_filled(a, b, col32(0, 0, 0))
+        if tex is not None:
+            uv0, uv1 = (V2(0, 1), V2(1, 0)) if uv_flip else (V2(0, 0), V2(1, 1))
+            dl.add_image(imgui.ImTextureRef(tex.glo), a, b, uv0, uv1)
+        dl.add_rect(V2(a.x - 0.5, a.y - 0.5), V2(b.x + 0.5, b.y + 0.5), col32(1, 1, 1, 0.14), 0, 1)
+
+    def rulers(self, dl, pos, size, cv, w_px, h_px, mouse, hovered):
         sc = self.sc
-        step = 26 * sc
-        c = col32(1, 1, 1, 0.07)
-        y = pos.y + step / 2
-        while y < pos.y + size.y:
-            x = pos.x + step / 2
-            while x < pos.x + size.x:
-                dl.add_rect_filled(V2(x, y), V2(x + 1.2, y + 1.2), c)
-                x += step
-            y += step
+        t = 22 * sc
+        tl = 40 * sc
+        strip = col32(1, 1, 1, 0.025)
+        dl.add_rect_filled(pos, V2(pos.x + size.x, pos.y + t), strip)
+        dl.add_rect_filled(V2(pos.x, pos.y + t), V2(pos.x + tl, pos.y + size.y), strip)
+        dl.add_line(V2(pos.x, pos.y + t), V2(pos.x + size.x, pos.y + t), col32(1, 1, 1, 0.07), 1)
+        dl.add_line(V2(pos.x + tl, pos.y), V2(pos.x + tl, pos.y + size.y), col32(1, 1, 1, 0.07), 1)
+        ppx = cv.extent[0] / w_px
+        step = 10
+        for s_ in (10, 20, 50, 100, 200, 250, 500, 1000):
+            step = s_
+            if s_ * ppx >= 9 * sc:
+                break
+        major = step * 5 if step != 250 else 1000
+        tick = col32(1, 1, 1, 0.14)
+        tick_m = col32(1, 1, 1, 0.34)
+        lab = col32(*DIM, 0.85)
+        v = 0
+        while v <= w_px:
+            x = cv.origin[0] + v * ppx
+            if pos.x + tl <= x <= pos.x + size.x:
+                mj = v % major == 0
+                dl.add_line(V2(x, pos.y + t - (7 if mj else 3.5) * sc), V2(x, pos.y + t), tick_m if mj else tick, 1)
+                if mj:
+                    T.draw_text(dl, "mono", 7.5, V2(x + 3 * sc, pos.y + 4 * sc), lab, f"{v}")
+            v += step
+        ppy = cv.extent[1] / h_px
+        v = 0
+        while v <= h_px:
+            y = cv.origin[1] + v * ppy
+            if pos.y + t <= y <= pos.y + size.y:
+                mj = v % major == 0
+                dl.add_line(V2(pos.x + tl - (7 if mj else 3.5) * sc, y), V2(pos.x + tl, y), tick_m if mj else tick, 1)
+                if mj:
+                    T.draw_text(dl, "mono", 7.5, V2(pos.x + 7 * sc, y + 2 * sc), lab, f"{v}")
+            v += step
+        if hovered:
+            mx, my = mouse
+            dl.add_triangle_filled(V2(mx - 4 * sc, pos.y + t - 6 * sc), V2(mx + 4 * sc, pos.y + t - 6 * sc),
+                                   V2(mx, pos.y + t), col32(*ACCENT))
+            dl.add_triangle_filled(V2(pos.x + tl - 6 * sc, my - 4 * sc), V2(pos.x + tl - 6 * sc, my + 4 * sc),
+                                   V2(pos.x + tl, my), col32(*ACCENT))
+        T.draw_text(dl, "mono", 7.5, V2(pos.x + 8 * sc, pos.y + 5 * sc), col32(*FAINT), "px")
+
+    def cursor_readout(self, dl, pos, size, cv, w_px, h_px, mouse):
+        sc = self.sc
+        n = cv.to_norm(mouse)
+        if not (0 <= n[0] <= 1 and 0 <= n[1] <= 1) or self.drag:
+            return
+        mx, my = mouse
+        c = col32(1, 1, 1, 0.06)
+        dl.add_line(V2(pos.x, my), V2(pos.x + size.x, my), c, 1)
+        dl.add_line(V2(mx, pos.y), V2(mx, pos.y + size.y), c, 1)
+        txt = f"{n[0] * w_px:.0f}, {n[1] * h_px:.0f}"
+        tw = T.text_size("mono", 9, txt).x
+        a = V2(mx + 14 * sc, my + 14 * sc)
+        b = V2(a.x + tw + 20 * sc, a.y + 24 * sc)
+        T.glass(dl, a, b, 12 * sc, 1.4)
+        dl.add_rect_filled(a, b, col32(0.05, 0.05, 0.09, 0.55), 12 * sc)
+        T.draw_text(dl, "mono", 9, V2(a.x + 10 * sc, a.y + 5 * sc), col32(*INK), txt)
+
+    def callout(self, dl, anchor, num, name, info, color, strong):
+        sc = self.sc
+        al = 1.0 if strong else 0.6
+        ax, ay = anchor.x, anchor.y
+        kx, ky = ax + 20 * sc, ay - 22 * sc
+        dl.add_circle_filled(anchor, 3 * sc, col32(*color, al), 12)
+        dl.add_bezier_quadratic(anchor, V2(ax, ky), V2(kx, ky), col32(*color, al * 0.7), 1.2)
+        tw = T.text_size("ui_medium", 12, name).x
+        iw = T.text_size("ui", 11, info).x
+        h = 26 * sc
+        w = tw + iw + 44 * sc
+        r0, r1 = V2(kx, ky - h / 2), V2(kx + w, ky + h / 2)
+        T.glass(dl, r0, r1, h / 2, 1.5 if strong else 1.0, drop=strong)
+        dl.add_rect_filled(r0, r1, col32(0.04, 0.04, 0.08, 0.55 if strong else 0.45), h / 2)
+        cx = r0.x + 13 * sc
+        dl.add_circle_filled(V2(cx, ky), 4 * sc, col32(*color, al), 16)
+        T.draw_text(dl, "ui_medium", 12, V2(cx + 10 * sc, ky - 8 * sc), col32(*INK, al), name)
+        T.draw_text(dl, "ui", 11, V2(cx + 18 * sc + tw, ky - 7.5 * sc), col32(*DIM, al), info)
+
+    def handle(self, dl, c, color, hot, corner, label=None):
+        sc = self.sc
+        r = (6.0 if corner else 4.5) * sc
+        if hot:
+            T.glow(dl, c, 26 * sc, ACCENT, 2.0)
+            dl.add_circle_filled(V2(c.x, c.y + 1.5 * sc), r + 3 * sc, col32(0, 0, 0.05, 0.4), 24)
+            dl.add_circle_filled(c, r + 2.5 * sc, col32(1, 1, 1), 24)
+            dl.add_circle_filled(c, r - 0.5 * sc, col32(*ACCENT), 24)
+            if label:
+                tw = T.text_size("mono", 8.5, label).x
+                a = V2(c.x + 12 * sc, c.y - 28 * sc)
+                b = V2(a.x + tw + 16 * sc, a.y + 20 * sc)
+                dl.add_rect_filled(a, b, col32(*ACCENT, 0.9), 10 * sc)
+                T.draw_text(dl, "mono", 8.5, V2(a.x + 8 * sc, a.y + 3.5 * sc), col32(1, 1, 1), label)
+        else:
+            dl.add_circle_filled(V2(c.x, c.y + 1 * sc), r + 1.5 * sc, col32(0, 0, 0.05, 0.45), 20)
+            dl.add_circle_filled(c, r, col32(0.96, 0.96, 1.0, 0.95), 20)
+            dl.add_circle(c, r, col32(*color), 20, 2.0 * sc)
+
+    def loupe(self, dl, cv, mouse, tex, uv_flip):
+        if tex is None:
+            return
+        sc = self.sc
+        size = 140 * sc
+        n = cv.to_norm(mouse)
+        rad = 0.025 / max(cv.zoom, 1)
+        ar = cv.extent[1] / cv.extent[0]
+        u0, u1 = n[0] - rad * ar, n[0] + rad * ar
+        v0, v1 = n[1] - rad, n[1] + rad
+        if uv_flip:
+            v0, v1 = 1 - v0, 1 - v1
+        a = V2(mouse[0] + 30 * sc, mouse[1] - size - 30 * sc)
+        b = V2(a.x + size, a.y + size)
+        pad = 6 * sc
+        T.glass(dl, V2(a.x - pad, a.y - pad), V2(b.x + pad, b.y + 26 * sc), 18 * sc, 1.6)
+        dl.add_image_rounded(imgui.ImTextureRef(tex.glo), a, b, V2(u0, v0), V2(u1, v1), col32(1, 1, 1), 13 * sc)
+        cx, cy = (a.x + b.x) / 2, (a.y + b.y) / 2
+        ac = col32(*ACCENT)
+        dl.add_circle(V2(cx, cy), 7 * sc, ac, 24, 1.4)
+        dl.add_line(V2(cx - 16 * sc, cy), V2(cx - 9 * sc, cy), ac, 1.4)
+        dl.add_line(V2(cx + 9 * sc, cy), V2(cx + 16 * sc, cy), ac, 1.4)
+        dl.add_line(V2(cx, cy - 16 * sc), V2(cx, cy - 9 * sc), ac, 1.4)
+        dl.add_line(V2(cx, cy + 9 * sc), V2(cx, cy + 16 * sc), ac, 1.4)
+        T.draw_text(dl, "ui", 11, V2(a.x + 4 * sc, b.y + 5 * sc), col32(*DIM), "Loupe")
+        z = f"{1 / (2 * rad):.0f}x"
+        T.draw_text(dl, "ui_medium", 11, V2(b.x - T.text_size("ui_medium", 11, z).x - 4 * sc, b.y + 5 * sc), col32(*ACCENT), z)
+
+    def draw_status(self, m=14.0):
+        sc = self.sc
+        io = imgui.get_io()
+        dl = imgui.get_window_draw_list()
+        wp = imgui.get_window_pos()
+        ww = imgui.get_window_width()
+        a = V2(wp.x + m, wp.y + 6 * sc)
+        b = V2(wp.x + ww - m, wp.y + 6 * sc + 36 * sc)
+        T.glass(dl, a, b, 18 * sc, 0.9)
+        y = a.y + 10 * sc
+        x = a.x + 16 * sc
+        state, scol = self.source_state()
+
+        def seg(text, color, dot=None):
+            nonlocal x
+            if dot:
+                T.glow(dl, V2(x + 4 * sc, y + 8 * sc), 12 * sc, dot, 1.2)
+                dl.add_circle_filled(V2(x + 4 * sc, y + 8 * sc), 3.5 * sc, col32(*dot), 16)
+                x += 14 * sc
+            T.draw_text(dl, "ui", 12, V2(x, y), col32(*color), text)
+            x += T.text_size("ui", 12, text).x + 14 * sc
+            dl.add_circle_filled(V2(x, y + 8 * sc), 1.5 * sc, col32(1, 1, 1, 0.25), 8)
+            x += 14 * sc
+
+        seg(state.capitalize(), scol, scol)
+        seg(f"{io.framerate:.0f} fps", DIM)
+        seg(f"{self.project.width} x {self.project.height}", DIM)
+        n_open = self.app.open_count()
+        seg(f"{n_open} of {len(self.project.outputs)} outputs live", LIVE if n_open else DIM, LIVE if n_open else None)
+        it = self.selected()
+        if it is not None:
+            pt = ""
+            if isinstance(self.sel_point, tuple):
+                pt = f"  - point {self.sel_point[1]},{self.sel_point[0]}"
+            elif isinstance(self.sel_point, int):
+                pt = f"  - point {self.sel_point}"
+            seg(it.name + pt, INK)
+        if self.toast and imgui.get_time() - self.toast_time < 4:
+            msg, col = self.toast, ACCENT
+        else:
+            msg = "Drag to move  -  Shift fine  -  Alt corner only  -  Arrows nudge  -  Tab next point  -  Wheel zoom  -  Space pan"
+            col = FAINT
+        mw = T.text_size("ui", 11.5, msg).x
+        if b.x - 16 * sc - mw > x:
+            T.draw_text(dl, "ui", 11.5, V2(b.x - 16 * sc - mw, y + 1 * sc), col32(*col), msg)
 
     def _canvas_input(self, canvas, pos, size):
         imgui.set_cursor_screen_pos(pos)
@@ -1001,112 +1228,6 @@ class Editor:
             canvas.pan += np.array([io.mouse_delta.x, io.mouse_delta.y])
             return hovered, mouse, True
         return hovered, mouse, False
-
-    def _frame(self, dl, canvas, tex, uv_flip):
-        sc = self.sc
-        a = canvas.v((0, 0))
-        b = canvas.v((1, 1))
-        dl.add_rect_filled(a, b, col32(0, 0, 0))
-        if tex is not None:
-            uv0, uv1 = (V2(0, 1), V2(1, 0)) if uv_flip else (V2(0, 0), V2(1, 1))
-            dl.add_image(imgui.ImTextureRef(tex.glo), a, b, uv0, uv1)
-        dl.add_rect(V2(a.x - 0.5, a.y - 0.5), V2(b.x + 0.5, b.y + 0.5), col32(1, 1, 1, 0.14), 0, 1)
-        # registration brackets
-        g, L = 9 * sc, 16 * sc
-        c = col32(*INK, 0.75)
-        for (cx, cy, dx, dy) in ((a.x - g, a.y - g, 1, 1), (b.x + g, a.y - g, -1, 1),
-                                 (b.x + g, b.y + g, -1, -1), (a.x - g, b.y + g, 1, -1)):
-            dl.add_line(V2(cx, cy), V2(cx + dx * L, cy), c, 1)
-            dl.add_line(V2(cx, cy), V2(cx, cy + dy * L), c, 1)
-
-    def rulers(self, dl, pos, size, cv, w_px, h_px, mouse, hovered):
-        sc = self.sc
-        t = 22 * sc
-        tl = 40 * sc
-        strip = col32(0.045, 0.047, 0.05, 0.96)
-        dl.add_rect_filled(pos, V2(pos.x + size.x, pos.y + t), strip)
-        dl.add_rect_filled(V2(pos.x, pos.y + t), V2(pos.x + tl, pos.y + size.y), strip)
-        dl.add_line(V2(pos.x, pos.y + t), V2(pos.x + size.x, pos.y + t), col32(1, 1, 1, 0.08), 1)
-        dl.add_line(V2(pos.x + tl, pos.y), V2(pos.x + tl, pos.y + size.y), col32(1, 1, 1, 0.08), 1)
-        ppx = cv.extent[0] / w_px  # screen px per output px
-        step = 10
-        for s_ in (10, 20, 50, 100, 200, 250, 500, 1000):
-            step = s_
-            if s_ * ppx >= 9 * sc:
-                break
-        major = step * 5 if step not in (250,) else 1000
-        tick = col32(1, 1, 1, 0.16)
-        tick_m = col32(1, 1, 1, 0.38)
-        lab = col32(*DIM)
-        # horizontal
-        v = 0
-        while v <= w_px:
-            x = cv.origin[0] + v * ppx
-            if pos.x + tl <= x <= pos.x + size.x:
-                m = v % major == 0
-                dl.add_line(V2(x, pos.y + t - (7 if m else 3.5) * sc), V2(x, pos.y + t), tick_m if m else tick, 1)
-                if m:
-                    T.draw_text(dl, "mono", 7.5, V2(x + 3 * sc, pos.y + 3 * sc), lab, f"{v:04d}")
-            v += step
-        # vertical
-        ppy = cv.extent[1] / h_px
-        v = 0
-        while v <= h_px:
-            y = cv.origin[1] + v * ppy
-            if pos.y + t <= y <= pos.y + size.y:
-                m = v % major == 0
-                dl.add_line(V2(pos.x + tl - (7 if m else 3.5) * sc, y), V2(pos.x + tl, y), tick_m if m else tick, 1)
-                if m:
-                    T.draw_text(dl, "mono", 7.5, V2(pos.x + 6 * sc, y + 2 * sc), lab, f"{v:04d}")
-            v += step
-        if hovered:
-            mx, my = mouse
-            dl.add_triangle_filled(V2(mx - 4 * sc, pos.y + t - 6 * sc), V2(mx + 4 * sc, pos.y + t - 6 * sc),
-                                   V2(mx, pos.y + t), col32(*ACCENT))
-            dl.add_triangle_filled(V2(pos.x + tl - 6 * sc, my - 4 * sc), V2(pos.x + tl - 6 * sc, my + 4 * sc),
-                                   V2(pos.x + tl, my), col32(*ACCENT))
-        dl.add_rect_filled(pos, V2(pos.x + tl, pos.y + t), strip)
-        T.draw_text(dl, "mono", 7.5, V2(pos.x + 6 * sc, pos.y + 5 * sc), col32(*DIM), "PX")
-
-    def cursor_readout(self, dl, pos, size, cv, w_px, h_px, mouse):
-        sc = self.sc
-        n = cv.to_norm(mouse)
-        if not (0 <= n[0] <= 1 and 0 <= n[1] <= 1) or self.drag:
-            return
-        mx, my = mouse
-        c = col32(1, 1, 1, 0.07)
-        dl.add_line(V2(pos.x, my), V2(pos.x + size.x, my), c, 1)
-        dl.add_line(V2(mx, pos.y), V2(mx, pos.y + size.y), c, 1)
-        txt = f"X {n[0] * w_px:04.0f}  Y {n[1] * h_px:04.0f}"
-        tw = T.tracked_width("mono", 9, txt, 0.8)
-        a = V2(mx + 14 * sc, my + 14 * sc)
-        dl.add_rect_filled(a, V2(a.x + tw + 14 * sc, a.y + 20 * sc), col32(0.02, 0.02, 0.022, 0.85), 3 * sc)
-        dl.add_rect(a, V2(a.x + tw + 14 * sc, a.y + 20 * sc), col32(1, 1, 1, 0.12), 3 * sc, 1)
-        T.draw_text(dl, "mono", 9, V2(a.x + 7 * sc, a.y + 4 * sc), col32(*INK), txt, 0.8)
-
-    def callout(self, dl, anchor, num, name, info, color, strong):
-        sc = self.sc
-        a = 1.0 if strong else 0.55
-        ax, ay = anchor.x, anchor.y
-        kx, ky = ax + 22 * sc, ay - 22 * sc
-        dl.add_circle_filled(anchor, 2.5 * sc, col32(*color, a))
-        dl.add_line(anchor, V2(kx, ky), col32(*color, a * 0.8), 1)
-        dl.add_line(V2(kx, ky), V2(kx + 12 * sc, ky), col32(*color, a * 0.8), 1)
-        bx = kx + 12 * sc
-        nw = T.text_size("mono_medium", 9, num).x
-        tw = T.text_size("ui", 12, name).x
-        iw = T.text_size("mono", 8.5, info).x
-        w = nw + tw + iw + 34 * sc
-        h = 22 * sc
-        r0, r1 = V2(bx, ky - h / 2), V2(bx + w, ky + h / 2)
-        dl.add_rect_filled(r0, r1, col32(0.03, 0.032, 0.035, 0.88 if strong else 0.7), 4 * sc)
-        dl.add_rect(r0, r1, col32(*color, a * 0.6), 4 * sc, 1)
-        x = bx + 8 * sc
-        T.draw_text(dl, "mono_medium", 9, V2(x, ky - 6.5 * sc), col32(*color, a), num)
-        x += nw + 8 * sc
-        T.draw_text(dl, "ui", 12, V2(x, ky - 8 * sc), col32(*INK, a), name)
-        x += tw + 10 * sc
-        T.draw_text(dl, "mono", 8.5, V2(x, ky - 6 * sc), col32(*DIM, a), info)
 
     def dashed(self, dl, pts, color, thick, dash=7.0, gap=5.0):
         sc = self.sc
@@ -1124,22 +1245,6 @@ class Editor:
                 p0, p1 = a + d * t, a + d * e
                 dl.add_line(V2(*p0), V2(*p1), color, thick)
                 t = e + gap * sc
-
-    def handle(self, dl, c, color, hot, corner, label=None):
-        sc = self.sc
-        r = (4.5 if corner else 3.5) * sc
-        if hot:
-            L = 16 * sc
-            dl.add_line(V2(c.x - L, c.y), V2(c.x - r - 3 * sc, c.y), col32(*ACCENT, 0.9), 1)
-            dl.add_line(V2(c.x + r + 3 * sc, c.y), V2(c.x + L, c.y), col32(*ACCENT, 0.9), 1)
-            dl.add_line(V2(c.x, c.y - L), V2(c.x, c.y - r - 3 * sc), col32(*ACCENT, 0.9), 1)
-            dl.add_line(V2(c.x, c.y + r + 3 * sc), V2(c.x, c.y + L), col32(*ACCENT, 0.9), 1)
-            dl.add_rect_filled(V2(c.x - r, c.y - r), V2(c.x + r, c.y + r), col32(*ACCENT))
-            if label:
-                T.draw_text(dl, "mono", 8.5, V2(c.x + 10 * sc, c.y - 20 * sc), col32(*ACCENT), label, 0.6)
-        else:
-            dl.add_rect_filled(V2(c.x - r, c.y - r), V2(c.x + r, c.y + r), col32(0.03, 0.03, 0.035, 0.95))
-            dl.add_rect(V2(c.x - r, c.y - r), V2(c.x + r, c.y + r), col32(*color), 0, 1.4 * sc)
 
     def output_view(self, dl, pos, size):
         p = self.project
@@ -1252,35 +1357,6 @@ class Editor:
         if self.drag and self.drag[0] == "point":
             self.loupe(dl, cv, mouse, self.app.renderer.tex(self.project.active_output), True)
 
-    def loupe(self, dl, cv, mouse, tex, uv_flip):
-        if tex is None:
-            return
-        sc = self.sc
-        size = 132 * sc
-        n = cv.to_norm(mouse)
-        rad = 0.025 / max(cv.zoom, 1)
-        ar = cv.extent[1] / cv.extent[0]
-        u0, u1 = n[0] - rad * ar, n[0] + rad * ar
-        v0, v1 = n[1] - rad, n[1] + rad
-        if uv_flip:
-            v0, v1 = 1 - v0, 1 - v1
-        a = V2(mouse[0] + 28 * sc, mouse[1] - size - 28 * sc)
-        b = V2(a.x + size, a.y + size)
-        dl.add_rect_filled(V2(a.x - 1, a.y - 1), V2(b.x + 1, b.y + 22 * sc), col32(0.02, 0.02, 0.022, 0.95), 4 * sc)
-        dl.add_image(imgui.ImTextureRef(tex.glo), a, b, V2(u0, v0), V2(u1, v1))
-        cx, cy = (a.x + b.x) / 2, (a.y + b.y) / 2
-        ac = col32(*ACCENT)
-        dl.add_line(V2(cx - 10 * sc, cy), V2(cx - 3 * sc, cy), ac, 1)
-        dl.add_line(V2(cx + 3 * sc, cy), V2(cx + 10 * sc, cy), ac, 1)
-        dl.add_line(V2(cx, cy - 10 * sc), V2(cx, cy - 3 * sc), ac, 1)
-        dl.add_line(V2(cx, cy + 3 * sc), V2(cx, cy + 10 * sc), ac, 1)
-        L = 12 * sc
-        for (x, y, dx, dy) in ((a.x, a.y, 1, 1), (b.x, a.y, -1, 1), (b.x, b.y, -1, -1), (a.x, b.y, 1, -1)):
-            dl.add_line(V2(x, y), V2(x + dx * L, y), ac, 1.4)
-            dl.add_line(V2(x, y), V2(x, y + dy * L), ac, 1.4)
-        T.draw_text(dl, "mono", 8.5, V2(a.x + 6 * sc, b.y + 5 * sc), col32(*DIM), "LOUPE", 1.2)
-        T.draw_text(dl, "mono", 8.5, V2(b.x - 30 * sc, b.y + 5 * sc), col32(*ACCENT), f"x{1 / (2 * rad):.0f}")
-
     def _snapshot(self):
         it = self.selected()
         if it is None:
@@ -1355,17 +1431,14 @@ class Editor:
         p = self.project
         cols, rows = p.input_cols, p.input_rows
         if cols * rows > 1:
-            gc = col32(*ACCENT, 0.5)
+            gc = col32(*ACCENT, 0.7)
             for c in range(1, cols):
                 dl.add_line(cv.v((c / cols, 0)), cv.v((c / cols, 1)), gc, 1)
             for r in range(1, rows):
                 dl.add_line(cv.v((0, r / rows)), cv.v((1, r / rows)), gc, 1)
             for k in range(cols * rows):
                 a = cv.v(((k % cols) / cols, (k // cols) / rows))
-                tag = f"CAM {k + 1:02d}"
-                tw = T.tracked_width("mono_medium", 9, tag, 1.0)
-                dl.add_rect_filled(V2(a.x, a.y), V2(a.x + tw + 14 * sc, a.y + 20 * sc), col32(*ACCENT, 0.9))
-                T.draw_text(dl, "mono_medium", 9, V2(a.x + 7 * sc, a.y + 4 * sc), col32(0.03, 0.03, 0.03), tag, 1.0)
+                self.pill(dl, V2(a.x + 8 * sc, a.y + 8 * sc), f"Camera {k + 1}", (0.78, 0.74, 1.0), backing=True)
         ao = p.active_output
         for i, s in enumerate(p.surfaces):
             if s.output != ao:
@@ -1433,51 +1506,6 @@ class Editor:
         self.sel_point = None
 
     # ================================================================ status / keys
-    def draw_status(self):
-        sc = self.sc
-        io = imgui.get_io()
-        dl = imgui.get_window_draw_list()
-        wp = imgui.get_window_pos()
-        ww = imgui.get_window_width()
-        hh = imgui.get_window_height()
-        dl.add_line(wp, V2(wp.x + ww, wp.y), col32(1, 1, 1, 0.06), 1)
-        y = wp.y + (hh - 12 * sc) / 2
-        x = wp.x + 18 * sc
-        state, scol = self.source_state()
-
-        def seg(text, color, dot=None):
-            nonlocal x
-            if dot:
-                dl.add_circle_filled(V2(x + 3 * sc, y + 6 * sc), 3 * sc, col32(*dot))
-                x += 12 * sc
-            T.draw_text(dl, "mono", 9, V2(x, y), col32(*color), text, 1.0)
-            x += T.tracked_width("mono", 9, text, 1.0) + 14 * sc
-            dl.add_line(V2(x, y), V2(x, y + 12 * sc), col32(1, 1, 1, 0.1), 1)
-            x += 14 * sc
-
-        seg(state, scol, scol)
-        seg(f"FPS {io.framerate:03.0f}", DIM)
-        seg(f"OUT {self.project.width}x{self.project.height}", DIM)
-        n_open = self.app.open_count()
-        seg(f"OUTPUTS {n_open}/{len(self.project.outputs)} LIVE", LIVE if n_open else DIM)
-        it = self.selected()
-        if it is not None:
-            pt = ""
-            if isinstance(self.sel_point, tuple):
-                pt = f"  PT {self.sel_point[1]},{self.sel_point[0]}"
-            elif isinstance(self.sel_point, int):
-                pt = f"  PT {self.sel_point}"
-            seg(("SEL " + it.name).upper() + pt, INK)
-        if self.toast and imgui.get_time() - self.toast_time < 4:
-            msg = self.toast.upper()
-            col = ACCENT
-        else:
-            msg = "DRAG MOVE  /  SHIFT FINE  /  ALT CORNER  /  ARROWS NUDGE  /  TAB NEXT  /  WHEEL ZOOM  /  SPACE PAN"
-            col = FAINT
-        mw = T.tracked_width("mono", 8.5, msg, 0.8)
-        if wp.x + ww - 18 * sc - mw > x:
-            T.draw_text(dl, "mono", 8.5, V2(wp.x + ww - 18 * sc - mw, y + 1 * sc), col32(*col), msg, 0.8)
-
     def after_history(self):
         self.app.rebuild_source()
         for idx in list(self.app.outs):

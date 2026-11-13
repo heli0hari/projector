@@ -1,7 +1,7 @@
 bl_info = {
     "name": "ProjMap Spout Sender",
     "author": "Siva",
-    "version": (1, 1, 0),
+    "version": (1, 2, 0),
     "blender": (3, 6, 0),
     "location": "3D View > Sidebar (N) > ProjMap",
     "description": "Streams the scene camera, or several cameras as one atlas, to ProjMap over Spout",
@@ -29,6 +29,36 @@ _state = {
     "fps": 0.0,
     "error": "",
 }
+
+
+def ensure_high_performance_gpu():
+    """Same as Windows Settings > Graphics > High performance, for blender.exe.
+    Spout only shares frames between apps on the same GPU."""
+    if os.name != "nt":
+        return False
+    try:
+        import winreg
+        exe = os.path.abspath(bpy.app.binary_path)
+        key = r"Software\Microsoft\DirectX\UserGpuPreferences"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key) as k:
+            try:
+                cur, _ = winreg.QueryValueEx(k, exe)
+            except FileNotFoundError:
+                cur = None
+            if cur == "GpuPreference=2;":
+                return False
+            winreg.SetValueEx(k, exe, 0, winreg.REG_SZ, "GpuPreference=2;")
+            return True
+    except Exception as e:
+        print("ProjMap: could not set GPU preference:", e)
+        return False
+
+
+def gpu_name():
+    try:
+        return gpu.platform.renderer_get()
+    except Exception:
+        return ""
 
 
 def modules_dir():
@@ -386,6 +416,11 @@ class PROJMAP_PT_panel(bpy.types.Panel):
         if _state["error"]:
             layout.label(text=_state["error"], icon="ERROR")
         layout.label(text="Uses the viewport's shading mode.", icon="INFO")
+        if _state.get("gpu_changed"):
+            layout.label(text="GPU set to high performance: restart Blender once.", icon="ERROR")
+        name = gpu_name()
+        if name:
+            layout.label(text="GPU: " + name[:40], icon="MEMORY")
 
 
 class PROJMAP_Prefs(bpy.types.AddonPreferences):
@@ -408,6 +443,7 @@ def register():
         bpy.utils.register_class(c)
     bpy.types.Scene.projmap = bpy.props.PointerProperty(type=PROJMAP_Props)
     modules_dir()
+    _state["gpu_changed"] = ensure_high_performance_gpu()
 
 
 def unregister():
