@@ -20,6 +20,8 @@ def file_dialog(save=False, kind="project"):
         root.attributes("-topmost", True)
         if kind == "project":
             types = [("ProjMap project", "*.projmap.json *.json"), ("All files", "*.*")]
+        elif kind == "video":
+            types = [("Videos", "*.mp4 *.mov *.mkv *.avi *.webm *.m4v"), ("All files", "*.*")]
         else:
             types = [("Images", "*.png *.jpg *.jpeg *.bmp *.tga *.webp"), ("All files", "*.*")]
         if save:
@@ -123,6 +125,11 @@ class Editor:
             return "WAITING", WARN
         if kind == "image":
             return "STILL", INK
+        if kind == "video":
+            src = self.app.source
+            if not getattr(src, "ok", False):
+                return "NO VIDEO", WARN
+            return ("PLAYING" if src.playing else "PAUSED"), (LIVE if src.playing else INK)
         return "TEST", ACCENT
 
     # ================================================================ actions
@@ -290,6 +297,51 @@ class Editor:
         o.borderless = False
         p.outputs.append(o)
         self.set_active_output(len(p.outputs) - 1)
+
+    def video_controls(self):
+        p = self.project
+        app = self.app
+        sc = self.sc
+        self.label("File")
+        imgui.set_next_item_width(-84 * sc)
+        name = p.video_path.replace("\\", "/").split("/")[-1] if p.video_path else ""
+        imgui.input_text_with_hint("##vid", "No video chosen", name, imgui.InputTextFlags_.read_only)
+        imgui.same_line()
+        if self.button("Browse", -1):
+            path = file_dialog(False, "video")
+            if path:
+                p.video_path = path
+                app.rebuild_source()
+                app.dirty = True
+        src = app.source
+        if not getattr(src, "ok", False):
+            return
+        # transport: play / pause, scrub, loop
+        self.label("")
+        playing = src.playing
+        if self.button("Pause" if playing else "Play", 74 * sc, "ghost" if playing else "primary"):
+            src.play(not playing)
+        imgui.same_line()
+        dur = max(src.duration, 0.01)
+        imgui.set_next_item_width(-1)
+        t = src.position
+        ch, t = imgui.slider_float("##scrub", t, 0.0, dur, self._fmt_time(t) + " / " + self._fmt_time(dur))
+        if ch:
+            src.seek(t)
+        self.label("Loop")
+        ch, p.video_loop = self.toggle("##loop", p.video_loop)
+        if ch:
+            src.loop = p.video_loop
+            app.dirty = True
+        imgui.same_line(0, 16 * sc)
+        if self.button("Restart", 0):
+            src.seek(0.0)
+            src.play(True)
+
+    @staticmethod
+    def _fmt_time(t):
+        m, sec = divmod(max(t, 0.0), 60)
+        return f"{int(m)}:{sec:04.1f}"
 
     def split_cameras(self):
         """One free, movable output window per atlas tile, each filled with that camera."""
@@ -662,7 +714,9 @@ class Editor:
                         a, V2(a.x + fill, a.y))
         T.draw_text(dl, "ui", 12, V2(a.x + bw + 10 * sc, a.y - 3 * sc), col32(*DIM), f"{fps:.0f} / 60 fps")
         imgui.dummy(V2(0, ch + 10 * sc))
-        srcname = {"spout": "Spout", "image": "Image", "test": "Test pattern"}[p.source_kind]
+        srcname = {"spout": "Spout", "image": "Image", "test": "Test pattern", "video": "Video"}[p.source_kind]
+        if p.source_kind == "video" and p.video_path:
+            srcname += " - " + p.video_path.replace("\\", "/").split("/")[-1][:22]
         if p.source_kind == "spout" and p.spout_name:
             srcname += " - " + p.spout_name[:16]
         sw, sh = src.size if src else (0, 0)
@@ -694,8 +748,8 @@ class Editor:
 
         # ---- input
         self.begin_card("Input")
-        kinds = ["test", "spout", "image"]
-        labels = ["Test pattern", "Spout  (Blender / AE)", "Image file"]
+        kinds = ["test", "spout", "image", "video"]
+        labels = ["Test pattern", "Spout  (Blender / AE)", "Image file", "Video file"]
         cur = kinds.index(p.source_kind) if p.source_kind in kinds else 0
         self.label("Source")
         ch, cur = imgui.combo("##srckind", cur, labels)
@@ -723,6 +777,8 @@ class Editor:
                         p.spout_name = n
                         app.rebuild_source()
                 imgui.end_popup()
+        elif p.source_kind == "video":
+            self.video_controls()
         elif p.source_kind == "image":
             self.label("File")
             imgui.set_next_item_width(-84 * sc)

@@ -25,7 +25,7 @@ Rather than writing a custom AE plugin, use the free, maintained route:
 Alternative: the open-source `Spout-AfterEffects` plugin sends Spout directly, but it's older and may not load in current AE versions.
 
 ## Workflow
-1. Set **Input**: Spout, a test pattern, or an image.
+1. Set **Input**: Spout, a test pattern, an image, or a **video file** (with play/pause, scrub and loop; no audio).
 2. **Outputs**: each output is either *Fullscreen on display* or a *Free window* that you can move and resize (with no-frame, lock and on-top options). Every output has its own surfaces. Click **Open**, the dot on the output's row, or press F to show it.
 3. **Output tab**: drag the 4 corners onto the real object. Corner pin is perspective-correct.
 4. For curved surfaces, raise **Grid** (e.g. 4x3) and drag the inner points. Moving a corner carries the whole mesh with it; hold Alt to move only the corner.

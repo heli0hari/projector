@@ -24,14 +24,14 @@ jobs:
           pip install -r requirements.txt SpoutGL pyinstaller
 
       - name: Smoke test imports
-        run: python -c "import glfw, moderngl, imgui_bundle, OpenGL, SpoutGL, numpy, PIL; print('imports ok')"
+        run: python -c "import glfw, moderngl, imgui_bundle, OpenGL, SpoutGL, numpy, PIL, av; print('imports ok')"
 
       - name: Build
         run: >
           pyinstaller --noconfirm --windowed --name ProjMap
           --add-data "app/fonts;app/fonts"
           --collect-all imgui_bundle --collect-all SpoutGL --collect-all glfw
-          --collect-all glcontext --collect-all OpenGL
+          --collect-all glcontext --collect-all OpenGL --collect-all av
           run.py
 
       - name: Package

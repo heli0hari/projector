@@ -125,9 +125,11 @@ class Output:
 
 class Project:
     def __init__(self):
-        self.source_kind = "test"      # test | spout | image
+        self.source_kind = "test"      # test | spout | image | video
         self.spout_name = ""
         self.image_path = ""
+        self.video_path = ""
+        self.video_loop = True
         self.flip_input = False
         self.input_cols = 1            # camera atlas layout of the input
         self.input_rows = 1
@@ -182,6 +184,7 @@ class Project:
             "version": 2,
             "source_kind": self.source_kind, "spout_name": self.spout_name,
             "image_path": self.image_path, "flip_input": self.flip_input,
+            "video_path": self.video_path, "video_loop": self.video_loop,
             "input_cols": self.input_cols, "input_rows": self.input_rows,
             "outputs": [o.to_dict() for o in self.outputs],
             "active_output": self.active_output,
@@ -193,6 +196,8 @@ class Project:
         self.source_kind = d.get("source_kind", "test")
         self.spout_name = d.get("spout_name", "")
         self.image_path = d.get("image_path", "")
+        self.video_path = d.get("video_path", "")
+        self.video_loop = d.get("video_loop", True)
         self.flip_input = d.get("flip_input", False)
         self.input_cols = int(d.get("input_cols", 1))
         self.input_rows = int(d.get("input_rows", 1))

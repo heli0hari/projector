@@ -147,6 +147,174 @@ class SpoutSource(Source):
         super().release()
 
 
+class VideoSource(Source):
+    """Decodes a video file on a background thread and streams frames into a texture."""
+
+    def __init__(self, ctx, path, loop=True):
+        super().__init__(ctx)
+        import threading
+        import queue
+        self.path = path
+        self.loop = loop
+        self.playing = True
+        self.duration = 0.0
+        self.fps = 30.0
+        self.position = 0.0          # seconds of the frame on screen
+        self.frames = queue.Queue(maxsize=6)
+        self._seek_to = None
+        self._clock_origin = None    # perf_counter at position 0
+        self._lock = threading.Lock()
+        self._stop = False
+        self._eof = False
+        self._pending = None
+        try:
+            import av
+            self.container = av.open(path)
+            self.stream = self.container.streams.video[0]
+            self.stream.thread_type = "AUTO"
+            w, h = self.stream.codec_context.width, self.stream.codec_context.height
+            if self.stream.duration and self.stream.time_base:
+                self.duration = float(self.stream.duration * self.stream.time_base)
+            elif self.container.duration:
+                self.duration = self.container.duration / 1_000_000
+            if self.stream.average_rate:
+                self.fps = float(self.stream.average_rate)
+            self.texture = _make_texture(ctx, w, h)
+            self.status = f"Video {w}x{h}  {self.fps:.0f} fps"
+            self.ok = True
+        except Exception as e:
+            self.texture = _make_texture(ctx, 4, 4, bytes(64))
+            self.status = f"Video failed: {e}"
+            self.ok = False
+            return
+        self.thread = threading.Thread(target=self._decode, daemon=True)
+        self.thread.start()
+
+    # ---------------------------------------------------------- decoding thread
+    def _decode(self):
+        import queue
+        while not self._stop:
+            with self._lock:
+                seek = self._seek_to
+                self._seek_to = None
+            if seek is not None:
+                try:
+                    self.container.seek(int(seek / self.stream.time_base), stream=self.stream, backward=True)
+                except Exception:
+                    pass
+                self._drain()
+                self._eof = False
+                skip_until = seek
+            else:
+                skip_until = None
+            try:
+                for frame in self.container.decode(self.stream):
+                    if self._stop or self._seek_to is not None:
+                        break
+                    t = float(frame.pts * self.stream.time_base) if frame.pts is not None else 0.0
+                    if skip_until is not None and t < skip_until - 0.5 / self.fps:
+                        continue
+                    skip_until = None
+                    img = frame.to_ndarray(format="rgba")
+                    while not self._stop and self._seek_to is None:
+                        try:
+                            self.frames.put((t, img), timeout=0.05)
+                            break
+                        except queue.Full:
+                            continue
+                else:
+                    self._eof = True
+                    if self.loop and not self._stop:
+                        with self._lock:
+                            if self._seek_to is None:
+                                self._seek_to = 0.0
+                    else:
+                        while not self._stop and self._seek_to is None:
+                            import time
+                            time.sleep(0.02)
+            except Exception as e:
+                self.status = f"Decode error: {e}"
+                import time
+                time.sleep(0.1)
+
+    def _drain(self):
+        import queue
+        try:
+            while True:
+                self.frames.get_nowait()
+        except queue.Empty:
+            pass
+
+    # ---------------------------------------------------------- main thread
+    def _now(self):
+        import time
+        return time.perf_counter()
+
+    def update(self):
+        if not self.ok:
+            return
+        import queue
+        now = self._now()
+        if self._clock_origin is None:
+            self._clock_origin = now - self.position
+        clock = (now - self._clock_origin) if self.playing else self.position
+        half = 0.5 / self.fps
+        while True:
+            frame = self._pending
+            self._pending = None
+            if frame is None:
+                try:
+                    frame = self.frames.get_nowait()
+                except queue.Empty:
+                    break
+            t, img = frame
+            if self.playing and t < self.position - 0.5:
+                # the decoder looped back to the start: restart the clock there
+                self._clock_origin = now - t
+                clock = t
+            if self._show_one or (self.playing and t <= clock + half):
+                self._upload(img, t)
+                self._show_one = False
+                continue
+            self._pending = frame
+            break
+
+    _show_one = True
+
+    def _upload(self, img, t):
+        h, w = img.shape[:2]
+        if (w, h) != self.texture.size:
+            self.texture.release()
+            self.texture = _make_texture(self.ctx, w, h)
+        self.texture.write(img.tobytes())
+        self.position = t
+
+    def play(self, on=True):
+        if on and not self.playing:
+            self._clock_origin = self._now() - self.position
+        self.playing = on
+
+    def seek(self, seconds):
+        seconds = max(0.0, min(seconds, max(self.duration - 0.05, 0.0)))
+        with self._lock:
+            self._seek_to = seconds
+        self._pending = None
+        self._drain()
+        self.position = seconds
+        self._clock_origin = self._now() - seconds
+        self._show_one = True
+
+    def release(self):
+        self._stop = True
+        if getattr(self, "thread", None):
+            self.thread.join(timeout=1.0)
+        try:
+            self.container.close()
+        except Exception:
+            pass
+        super().release()
+
+
 def list_spout_senders():
     if not HAVE_SPOUT:
         return []
@@ -169,4 +337,6 @@ def make_source(ctx, project):
         return SpoutSource(ctx, project.spout_name)
     if project.source_kind == "image" and project.image_path:
         return ImageSource(ctx, project.image_path)
+    if project.source_kind == "video" and project.video_path:
+        return VideoSource(ctx, project.video_path, project.video_loop)
     return TestPatternSource(ctx)
